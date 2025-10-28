@@ -125,20 +125,21 @@ impl Manager {
             .position(|a| a.last_triggered.is_none())
             .unwrap_or(actions.len().saturating_sub(1));
 
-        if actions[index].is_instant() {
+        if !actions.is_empty() && actions[index].is_instant() {
             return;
         }
 
         if self.state.lock_state.is_locked {
             if let Some(lock_index) = actions.iter().position(|a| matches!(a.kind, crate::config::model::IdleAction::LockScreen)) {
                 // Check if lock process is still running
-                let still_active = if let Some(cmd) = &self.state.lock_state.command {
-                    is_process_running(cmd).await
+                let cmd_to_check = self.state.lock_state.command.clone();
+                let still_active = if let Some(cmd) = cmd_to_check {
+                    is_process_running(&cmd).await
                 } else {
                     true // Assume lock is active if no command is specified
                 };
 
-                if still_active {
+                if still_active && self.state.lock_state.is_locked {
                     // Always advance to one past lock when locked
                     self.state.action_index = lock_index.saturating_add(1);
                     
@@ -147,7 +148,9 @@ impl Manager {
                         actions[self.state.action_index].last_triggered = Some(debounce_end); 
                     } else {
                         // If at the end, reset last_triggered for the last action
-                        actions[lock_index].last_triggered = Some(debounce_end);
+                        if lock_index < actions.len() {
+                            actions[lock_index].last_triggered = Some(debounce_end);
+                        } 
                     }
                     
                     self.state.lock_state.post_advanced = true;
@@ -221,7 +224,9 @@ impl Manager {
             let action_clone = actions[index].clone();
             
             // Update timing BEFORE running action
-            actions[index].last_triggered = Some(now);
+            if index < actions.len() {
+                actions[index].last_triggered = Some(now);
+            }
             
             // Advance index
             self.state.action_index += 1;
@@ -486,6 +491,10 @@ pub async fn spawn_lock_watcher(manager: Arc<Mutex<Manager>>) -> JoinHandle<()> 
 
                 if !still_active {
                     let mut mgr = manager.lock().await;
+
+                    if !mgr.state.lock_state.is_locked {
+                        break;  // Already unlocked, don't do it again
+                    }
 
                     if let Some(lock_action) = mgr.state.default_actions.iter()
                         .chain(mgr.state.ac_actions.iter())
