@@ -30,7 +30,9 @@ pub async fn spawn_ipc_socket_with_listener(
                     let mut buf = vec![0u8; 256];
                     if let Ok(n) = stream.read(&mut buf).await {
                         let cmd = String::from_utf8_lossy(&buf[..n]).trim().to_string();
-                        log_message(&format!("Received IPC command: {}", cmd));
+                        if !cmd.contains("--json") {
+                            log_message(&format!("Received IPC command: {}", cmd));
+                        }
 
                         let response = match cmd.as_str() {
                             // === CONFIG ===
@@ -140,13 +142,20 @@ pub async fn spawn_ipc_socket_with_listener(
                                 let uptime = mgr.state.start_time.elapsed();
                                 let mut inhibitor = app_inhibitor.lock().await;
                                 let app_blocking = inhibitor.is_any_app_running().await;
-                                let idle_inhibited = mgr.state.paused || app_blocking;
                                 let manually_inhibited = mgr.state.manually_paused;
+                                let idle_inhibited = mgr.state.paused || app_blocking || mgr.state.manually_paused;
 
                                 if as_json {
-                                    // Build JSON output and return as string
+                                    let icon = if mgr.state.manually_paused {
+                                        "🚫"
+                                    } else if idle_inhibited {
+                                        "☕"
+                                    } else {
+                                        "⌚"
+                                    };
+
                                     serde_json::json!({
-                                        "text": if idle_inhibited { "☕" } else { "⌚" },
+                                        "text": icon,
                                         "tooltip": format!(
                                             "{}\nIdle time: {}s\nUptime: {}s\nPaused: {}\nManually paused: {}\nApp blocking: {}",
                                             if idle_inhibited { "Idle inhibited" } else { "Idle active" },

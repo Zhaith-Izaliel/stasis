@@ -11,8 +11,23 @@ impl StasisConfig {
     ) -> String {
         let mut out = String::new();
 
+        out.push_str("Status:\n");
+
+        if let Some(idle) = idle_time {
+            out.push_str(&format!("  IdleTime           = {}\n", utils::format_duration(idle)));
+        }
+        if let Some(up) = uptime {
+            out.push_str(&format!("  Uptime             = {}\n", utils::format_duration(up)));
+        }
+        if let Some(inhibited) = is_inhibited {
+            out.push_str(&format!("  IdleInhibited      = {}\n", inhibited));
+        }
+        if let Some(inhibited) = is_manually_inhibited {
+            out.push_str(&format!("  ManuallyInhibited  = {}\n", inhibited));
+        }
+
         // General settings
-        out.push_str("General:\n");
+        out.push_str("\nConfig:\n");
         out.push_str(&format!(
             "  PreSuspendCommand  = {}\n",
             self.pre_suspend_command.as_deref().unwrap_or("-")
@@ -41,18 +56,7 @@ impl StasisConfig {
         };
         out.push_str(&format!("  InhibitApps        = {}\n", apps));
 
-        if let Some(idle) = idle_time {
-            out.push_str(&format!("  IdleTime           = {}\n", utils::format_duration(idle)));
-        }
-        if let Some(up) = uptime {
-            out.push_str(&format!("  Uptime             = {}\n", utils::format_duration(up)));
-        }
-        if let Some(inhibited) = is_inhibited {
-            out.push_str(&format!("  IdleInhibited      = {}\n", inhibited));
-        }
-        if let Some(inhibited) = is_manually_inhibited {
-            out.push_str(&format!("  ManuallyInhibited  = {}\n", inhibited));
-        }
+
 
         // Actions
         out.push_str("\nActions:\n");

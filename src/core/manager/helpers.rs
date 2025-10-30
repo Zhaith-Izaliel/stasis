@@ -154,7 +154,13 @@ pub fn get_manual_inhibit(state: &mut ManagerState) -> bool {
 
 pub async fn set_manual_inhibit(mgr: &mut Manager, inhibit: bool) {
     if inhibit {
+        // Enable manual pause
         mgr.pause(true).await;
+        mgr.state.manually_paused = true;
+    } else {
+        // Disable manual pause
+        mgr.resume(true).await;
+        mgr.state.manually_paused = false;
     }
 }
 
