@@ -140,7 +140,8 @@ pub async fn spawn_ipc_socket_with_listener(
                                 let uptime = mgr.state.start_time.elapsed();
                                 let mut inhibitor = app_inhibitor.lock().await;
                                 let app_blocking = inhibitor.is_any_app_running().await;
-                                let idle_inhibited = mgr.state.manually_paused || mgr.state.paused || app_blocking;
+                                let idle_inhibited = mgr.state.paused || app_blocking;
+                                let manually_inhibited = mgr.state.manually_paused;
 
                                 if as_json {
                                     // Build JSON output and return as string
@@ -159,7 +160,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                     .to_string()
                                 } else if let Some(cfg) = &mgr.state.cfg {
                                     // Dereference Arc to call pretty_print
-                                    cfg.pretty_print(Some(idle_time), Some(uptime), Some(idle_inhibited))
+                                    cfg.pretty_print(Some(idle_time), Some(uptime), Some(idle_inhibited), Some(manually_inhibited))
                                 } else {
                                     "No configuration loaded".to_string()
                                 }

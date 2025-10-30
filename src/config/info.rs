@@ -7,6 +7,7 @@ impl StasisConfig {
         idle_time: Option<Duration>,
         uptime: Option<Duration>,
         is_inhibited: Option<bool>,
+        is_manually_inhibited: Option<bool>,
     ) -> String {
         let mut out = String::new();
 
@@ -48,6 +49,9 @@ impl StasisConfig {
         }
         if let Some(inhibited) = is_inhibited {
             out.push_str(&format!("  IdleInhibited      = {}\n", inhibited));
+        }
+        if let Some(inhibited) = is_manually_inhibited {
+            out.push_str(&format!("  ManuallyInhibited  = {}\n", inhibited));
         }
 
         // Actions
