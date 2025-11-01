@@ -12,9 +12,6 @@
   Keep your session in perfect balance—automatically preventing idle when it matters, allowing it when it doesn't.
 </p>
 
-> [!WARNING]
-> Stasis Has Just received a major update with some breaking changes. Please see [wiki](https://github.com/saltnpepper97/stasis/wiki) for details.
-
 <p align="center">
   <b>Join the Official Stasis Discord!</b><br>
   <a href="https://discord.gg/v6gxRDjn">👉 Click here to join the community</a>
@@ -161,13 +158,9 @@ install -Dm755 target/release/stasis ~/.local/bin/stasis
 
 ## 🚀 Quick Start
 
-1. **Install Stasis** using one of the methods above
+Get up and running in just a few minutes!  
+See the [Quick Start Guide](https://github.com/saltnpepper97/stasis/wiki#quick-start) in the Wiki for setup instructions, including how to ensure your user is in the `input` group.
 
-2. **Create your configuration** at `~/.config/stasis/stasis.rune`
-
-3. **Check the [wiki](https://github.com/saltnpepper97/stasis/wiki)** for detailed configuration examples
-
-4. **Start the daemon** and enjoy intelligent idle management!
 
 For configuration examples, CLI options, and advanced usage, visit the [full documentation](https://github.com/saltnpepper97/stasis/wiki).
 
