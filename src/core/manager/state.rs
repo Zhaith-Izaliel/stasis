@@ -219,18 +219,17 @@ impl ManagerState {
 
         // Reset instant trigger flag
         self.instants_triggered = false;
+        // Reset debounce according to new cfg
+        let debounce = Duration::from_secs(cfg.debounce_seconds as u64);
+        self.debounce = Some(Instant::now() + debounce);
 
         self.cfg = Some(Arc::new(cfg.clone()));
         self.lock_state = LockState::from_config(cfg);
-        self.last_activity = Instant::now();
+        self.last_activity = Instant::now() + debounce;
         self.last_activity_display = Instant::now();
 
         // Reset action index
         self.action_index = 0;
-
-        // Reset debounce according to new cfg
-        let debounce = Duration::from_secs(cfg.debounce_seconds as u64);
-        self.debounce = Some(Instant::now() + debounce);
 
         // Wake idle task to recalc immediately
         self.notify.notify_one();
