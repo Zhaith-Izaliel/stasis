@@ -11,6 +11,7 @@ use crate::{
     config, core::{
         manager::{helpers::{get_manual_inhibit, set_manual_inhibit, trigger_all_idle_actions}, Manager}, 
         services::app_inhibit::AppInhibitor,
+        utils::format_duration,
     }, 
     ipc::commands::trigger_action_by_name, 
     log::{log_error_message, log_message}, 
@@ -181,10 +182,10 @@ pub async fn spawn_ipc_socket_with_listener(
                                                                 "text": "",
                                                                 "alt": icon,
                                                                 "tooltip": format!(
-                                                                    "{}\nIdle time: {}s\nUptime: {}s\nPaused: {}\nManually paused: {}\nApp blocking: {}",
+                                                                    "{}\nIdle time: {}\nUptime: {}\nPaused: {}\nManually paused: {}\nApp blocking: {}",
                                                                     if idle_inhibited { "Idle inhibited" } else { "Idle active" },
-                                                                    idle_time.as_secs(),
-                                                                    uptime.as_secs(),
+                                                                    format_duration(idle_time),
+                                                                    format_duration(uptime),
                                                                     paused,
                                                                     manually_inhibited,
                                                                     app_blocking
