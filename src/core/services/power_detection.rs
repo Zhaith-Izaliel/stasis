@@ -19,7 +19,7 @@ pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
         mgr.state.set_on_battery(!on_ac);
     }
 
-    log_message(&format!("Initial power deteciton: {}", if on_ac { "AC" } else { "Battery" }));
+    log_message(&format!("Initial power detection: {}", if on_ac { "AC" } else { "Battery" }));
     on_ac
 }
 
@@ -54,8 +54,6 @@ async fn is_on_ac_power() -> bool {
 
     false
 }
-
-
 
 pub async fn spawn_power_source_monitor(manager: Arc<Mutex<Manager>>) {
     let on_ac = detect_initial_power_state(&manager).await;

@@ -5,6 +5,7 @@ use tokio::sync::Notify;
 use crate::{
     config::model::{IdleAction, IdleActionBlock, StasisConfig}, log::log_message
 };
+use crate::core::utils::is_laptop;
 
 #[derive(Debug)]
 pub struct ManagerState {
@@ -102,7 +103,6 @@ impl ManagerState {
             .cloned()
             .collect();
 
-
         let now = Instant::now();
         let debounce = Some(now + Duration::from_secs(cfg.debounce_seconds as u64));
         let debounce_duration = Duration::from_secs(cfg.debounce_seconds as u64);
@@ -115,6 +115,12 @@ impl ManagerState {
             .cloned()
             .collect();
 
+        let chassis = if is_laptop() {
+            ChassisType::Laptop(LaptopState { on_battery: false })
+        } else {
+            ChassisType::Desktop(DesktopState)
+        };
+
         let state = Self {
             ac_actions,
             action_index: 0,
@@ -124,7 +130,7 @@ impl ManagerState {
             battery_actions,
             brightness_device: None,
             cfg: Some(cfg.clone()),
-            chassis: ChassisType::Desktop(DesktopState),
+            chassis,
             compositor_managed: false,
             current_block: None,
             debounce,

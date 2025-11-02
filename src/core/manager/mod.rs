@@ -368,7 +368,6 @@ impl Manager {
         self.state.notify.notify_one();
     }
 
-
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.manually_paused = true;
@@ -378,7 +377,6 @@ impl Manager {
             log_message("Idle timers automatically paused");
         }
     }
-
 
     pub async fn resume(&mut self, manually: bool) {
         if manually {
