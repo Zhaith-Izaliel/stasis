@@ -2,7 +2,7 @@
 @description "Stasis configuration file"
 
 # global variable
-default_timeout 300
+default_timeout 300  # 5 minute(s)
 
 #
 # Stasis configuration
@@ -32,19 +32,20 @@ stasis:
 
   # desktop-only idle actions (applies to all devices)
   lock_screen:
-    timeout 300
-    command "swaylock"
+    timeout 300  # 5 minute(s)
+    command "loginctl lock-session"
     resume-command "notify-send 'Welcome Back $env.USER!'"
+    lock-command "swaylock"
   end
 
   dpms:
-    timeout 60
+    timeout 60  # 1 minute(s)
     command "niri msg action power-off-monitors"
-    resume-command "niri msg action power-on-monitors"
+    resume-command "niri.msg action power-on-monitors"
   end
 
   suspend:
-    timeout 1800
+    timeout 1800  # 30 minute(s)
     command "systemctl suspend"
     resume-command None
   end
@@ -55,27 +56,27 @@ stasis:
     # Step 1: Adjust brightness (instant)
     # define it first so it does not retrigger later
     custom-brightness-instant:
-      timeout 0
+      timeout 0  # 0 second(s)
       command "brightnessctl set 100%"
     end
 
-    lock_screen:
-      timeout 300
-      command "swaylock"
-    end
-
     brightness:
-      timeout 10
+      timeout 120  # 2 minute(s)
       command "brightnessctl set 30%"
     end
 
     dpms:
-      timeout 60
+      timeout 60  # 1 minute(s)
       command "niri msg action power-off-monitors"
     end
 
+    lock_screen:
+      timeout 120  # 2 minute(s)
+      command "swaylock"
+    end
+
     suspend:
-      timeout 300
+      timeout 300  # 5 minute(s)
       command "systemctl suspend"
     end
   end
@@ -83,27 +84,29 @@ stasis:
   # Laptop-only battery actions
   on_battery:
     custom-brightness-instant:
-      timeout 0
+      timeout 0  # 0 second(s)
       command "brightnessctl set 40%"
     end
 
-    lock_screen:
-      timeout 120
-      command "swaylock"
-    end
-
     brightness:
-      timeout 5
-      command "brightnessctl set 30%"
+      timeout 60  # 1 minute(s)
+      command "brightnessctl set 20%"
     end
 
     dpms:
-      timeout 5
+      timeout 30  # 30 second(s)
       command "niri msg action power-off-monitors"
+      resume-command "niri msg action power-on-monitors"
+    end
+
+    lock_screen:
+      timeout 120  # 2 minute(s)
+      command "swaylock"
+      resume-command "Welcome back $env.USER!"
     end
 
     suspend:
-      timeout 120
+      timeout 120  # 2 minute(s)
       command "systemctl suspend"
     end
   end

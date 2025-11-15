@@ -44,7 +44,12 @@ fn default_laptop_config() -> String {
 
 stasis:
   monitor_media true
+  # Stop remote media from affecting pause
+  ignore_remote_media true
   respect_idle_inhibitors true
+  # Uncomment to customized debounce, default is 0
+  # debounce_seconds 4
+  
   inhibit_apps [
     "vlc"
     "mpv"
@@ -115,7 +120,14 @@ fn default_desktop_config() -> String {
 
 stasis:
   monitor_media true
+  # Stop remote media from affecting pause
+  ignore_remote_media true
   respect_idle_inhibitors true
+  # Uncomment to lock screen on lid close
+  #lid_close_action "lock-screen"
+  # Uncomment to customized debounce, default is 0
+  # debounce_seconds 4
+
   inhibit_apps [
     "vlc"
     "mpv"
