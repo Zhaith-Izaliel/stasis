@@ -4,17 +4,27 @@
   let activeSection = $state('');
   
   const sections = [
-    { id: 'app-detection', title: 'App Detection' },
-    { id: 'regex-patterns', title: 'Regex Patterns' },
-    { id: 'service-issues', title: 'Service Issues' },
-    { id: 'config-reload', title: 'Configuration Reload' },
-    { id: 'config-errors', title: 'Configuration Errors' },
-    { id: 'brightness', title: 'Brightness Issues' },
-    { id: 'input-timer', title: 'Input Timer Issues' },
-    { id: 'help', title: 'Need More Help?' }
+    { id: 'waybar', title: 'Waybar' }
   ];
   
   onMount(() => {
+    // Handle anchor links from other pages
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const element = document.getElementById(hash);
+      if (element) {
+        const topbarHeight = window.innerWidth <= 968 ? 0 : 70;
+        const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+        const offsetPosition = elementPosition - topbarHeight;
+        
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'instant'
+        });
+      }
+    }
+
+    // Observe sections for active state
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -37,7 +47,7 @@
   function scrollToSection(id: string) {
     const element = document.getElementById(id);
     if (element) {
-      const topbarHeight = 70;
+      const topbarHeight = window.innerWidth <= 968 ? 80 : 70;
       const elementPosition = element.getBoundingClientRect().top + window.scrollY;
       const offsetPosition = elementPosition - topbarHeight;
       
@@ -48,6 +58,7 @@
     }
   }
 </script>
+
 
 <div class="page-container">
   <nav class="links-nav">
@@ -174,238 +185,258 @@
 </div>
 
 <style>
+/* === LAYOUT === */
+.page-container {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+/* === SIDE NAVIGATION === */
+.links-nav {
+  position: sticky;
+  top: 80px;
+  height: fit-content;
+  padding-top: 8px; /* FIX: consistent top padding like FAQ */
+}
+
+.nav-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.links-nav ul {
+  list-style: none;
+  padding: 6px 0 0 0; /* padding to avoid flush anchor */
+  margin: 0;
+}
+
+.links-nav li {
+  margin: 0;
+}
+
+.links-nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 2px solid var(--border-color);
+  padding: 8px 0 8px 16px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.links-nav button:hover {
+  color: var(--text-primary);
+  border-left-color: var(--accent);
+}
+
+.links-nav button.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 500;
+}
+
+/* === CONTENT === */
+.content {
+  min-width: 0;
+}
+
+h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0 0 32px 0;
+  color: var(--text-primary);
+}
+
+h2 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin: 48px 0 16px 0;
+  color: var(--text-primary);
+  scroll-margin-top: 70px;
+}
+
+section {
+  margin-bottom: 48px;
+  scroll-margin-top: 70px;
+}
+
+p, li {
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+ul {
+  line-height: 1.8;
+  color: var(--text-primary);
+  margin: 16px 0;
+  padding-left: 24px;
+}
+
+li {
+  margin: 8px 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+a:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* === BLOCKS === */
+.warning,
+.info {
+  border-left: 4px solid;
+  padding: 20px;
+  margin: 24px 0;
+  border-radius: 4px;
+}
+
+.warning {
+  background: rgba(255, 193, 7, 0.1);
+  border-left-color: #ffc107;
+}
+
+.info {
+  background: var(--bg-secondary);
+  border-left-color: var(--accent);
+}
+
+.warning strong,
+.info strong {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 1.05rem;
+}
+
+code {
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+pre {
+  background: var(--bg-secondary);
+  padding: 20px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 20px 0;
+  border: 1px solid var(--border-color);
+  line-height: 1.5;
+}
+
+/* === MOBILE: unify and simplify === */
+@media (max-width: 968px) {
   .page-container {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 40px;
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 40px 20px;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 80px 16px 20px; /* hamburger space */
   }
-  
+
   .links-nav {
-    position: sticky;
-    top: 80px;
-    height: fit-content;
-  }
-  
-  .nav-title {
-    font-weight: 600;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-secondary);
-    margin-bottom: 12px;
-  }
-  
-  .links-nav ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-  
-  .links-nav li {
-    margin: 0;
-  }
-  
-  .links-nav button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    border-left: 2px solid var(--border-color);
-    padding: 6px 0 6px 16px;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  
-  .links-nav button:hover {
-    color: var(--text-primary);
-    border-left-color: var(--accent);
-  }
-  
-  .links-nav button.active {
-    color: var(--accent);
-    border-left-color: var(--accent);
-    font-weight: 500;
-  }
-  
-  .content {
-    min-width: 0;
-  }
-  
-  h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin: 0 0 32px 0;
-    color: var(--text-primary);
-  }
-  
-  h2 {
-    font-size: 1.75rem;
-    font-weight: 600;
-    margin: 48px 0 16px 0;
-    color: var(--text-primary);
-    scroll-margin-top: 120px;
-  }
-  
-  section {
-    margin-bottom: 48px;
-    scroll-margin-top: 120px;
-  }
-  
-  p {
-    line-height: 1.7;
-    color: var(--text-primary);
-    margin: 16px 0;
-  }
-  
-  ul {
-    line-height: 1.8;
-    color: var(--text-primary);
-    margin: 16px 0;
-    padding-left: 24px;
-  }
-  
-  li {
-    margin: 8px 0;
-  }
-  
-  ul ul {
-    margin: 8px 0;
-  }
-  
-  a {
-    color: var(--accent);
-    text-decoration: none;
-    transition: opacity 0.2s ease;
-  }
-  
-  a:hover {
-    opacity: 0.8;
-    text-decoration: underline;
-  }
-  
-  .warning {
-    background: rgba(255, 193, 7, 0.1);
-    border-left: 4px solid #ffc107;
-    padding: 20px;
-    margin: 24px 0;
-    border-radius: 4px;
-  }
-  
-  .warning strong {
-    display: block;
-    margin-bottom: 12px;
-    font-size: 1.05rem;
-  }
-  
-  .warning pre {
-    margin: 12px 0;
-  }
-  
-  .warning p {
-    margin: 8px 0;
-  }
-  
-  .info {
-    background: var(--bg-secondary);
-    border-left: 4px solid var(--accent);
-    padding: 20px;
-    margin: 24px 0;
-    border-radius: 4px;
-  }
-  
-  .info strong {
-    display: block;
+    position: static;
+    border-bottom: 1px solid var(--border-color);
+    padding-top: 12px;
+    padding-bottom: 16px;
     margin-bottom: 8px;
-    color: var(--accent);
   }
-  
-  .info ul {
-    margin: 8px 0;
+
+  .nav-title {
+    font-size: 0.8rem;
+    margin-bottom: 10px;
   }
-  
-  code {
-    background: var(--bg-secondary);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 0.9em;
-    color: var(--text-primary);
-  }
-  
-  pre {
-    background: var(--bg-secondary);
-    padding: 20px;
-    border-radius: 6px;
-    overflow-x: auto;
-    margin: 20px 0;
-    border: 1px solid var(--border-color);
-    line-height: 1.5;
-  }
-  
-  pre code {
-    background: none;
+
+  .links-nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     padding: 0;
-    font-size: 0.9rem;
   }
-  
-  @media (max-width: 968px) {
-    .page-container {
-      grid-template-columns: 1fr;
-      gap: 20px;
-      padding: 20px 16px;
-    }
-    
-    .links-nav {
-      position: static;
-      border-bottom: 1px solid var(--border-color);
-      padding-bottom: 16px;
-      margin-bottom: 8px;
-    }
-    
-    .nav-title {
-      font-size: 0.8rem;
-      margin-bottom: 8px;
-    }
-    
-    .links-nav ul {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    
-    .links-nav button {
-      border-left: none;
-      border-bottom: 2px solid transparent;
-      padding: 6px 12px;
-      font-size: 0.85rem;
-      background: var(--bg-secondary);
-      border-radius: 6px;
-    }
-    
-    .links-nav button.active {
-      border-bottom-color: var(--accent);
-      border-left: none;
-      background: rgba(168, 85, 247, 0.1);
-    }
-    
-    h1 {
-      font-size: 2rem;
-    }
-    
-    h2 {
-      font-size: 1.5rem;
-      scroll-margin-top: 20px;
-    }
-    
-    pre {
-      padding: 12px;
-      font-size: 0.85rem;
-    }
+
+  .links-nav button {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    text-align: center;
   }
+
+  .links-nav button.active {
+    border-bottom-color: var(--accent);
+    background: rgba(168, 85, 247, 0.1);
+  }
+
+  h1 {
+    font-size: 2rem;
+    margin-bottom: 24px;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    margin: 32px 0 12px 0;
+    scroll-margin-top: 100px;
+  }
+
+  section {
+    margin-bottom: 32px;
+    scroll-margin-top: 100px;
+  }
+
+  p, pre, ul {
+    font-size: 0.95rem;
+  }
+
+  pre {
+    padding: 12px;
+    font-size: 0.8rem;
+  }
+}
+
+/* === TINY DEVICES === */
+@media (max-width: 480px) {
+  .links-nav ul {
+    flex-direction: column;
+  }
+
+  .links-nav button {
+    font-size: 0.75rem;
+    padding: 8px 10px;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  pre {
+    font-size: 0.75rem;
+    padding: 10px;
+  }
+}
+
 </style>

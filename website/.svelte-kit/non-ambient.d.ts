@@ -41,6 +41,6 @@ declare module "$app/types" {
 		};
 		Pathname(): "/" | "/configuration" | "/configuration/" | "/contributing" | "/contributing/" | "/faq" | "/faq/" | "/integration" | "/integration/" | "/quick-start" | "/quick-start/";
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
-		Asset(): "/robots.txt" | string & {};
+		Asset(): "/favicon.png" | "/robots.txt" | string & {};
 	}
 }

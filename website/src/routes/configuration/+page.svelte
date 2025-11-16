@@ -17,6 +17,22 @@
   ];
   
   onMount(() => {
+    // Handle anchor links from other pages
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const element = document.getElementById(hash);
+      if (element) {
+        const topbarHeight = window.innerWidth <= 968 ? 0 : 70;
+        const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+        const offsetPosition = elementPosition - topbarHeight;
+        
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'instant'
+        });
+      }
+    }
+    
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -39,7 +55,14 @@
   function scrollToSection(id: string) {
     const element = document.getElementById(id);
     if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const topbarHeight = window.innerWidth <= 968 ? 80 : 70;
+      const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+      const offsetPosition = elementPosition - topbarHeight;
+      
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
     }
   }
 </script>
@@ -246,7 +269,7 @@ end</code></pre>
       
       <div class="warning">
         <strong>🔒 loginctl Integration:</strong>
-        When using <code>loginctl lock-session</code> as your lock command, you <strong>MUST</strong> specify 
+        When using <code>loginctl lock-session</code> as your lock command, you <b>MUST</b> specify 
         the actual locker via the <code>lock-command</code> parameter:
         <pre><code>lock_screen:
   timeout 300
@@ -254,12 +277,12 @@ end</code></pre>
   lock-command "swaylock"  # REQUIRED when using loginctl
 end</code></pre>
         <p>
-          The <code>lock-command</code> is <strong>required</strong> when <code>command</code> 
+          The <code>lock-command</code> is <b>required</b> when <code>command</code> 
           is set to <code>loginctl lock-session</code>. This tells loginctl which locker to use
           when managing the lock state.
         </p>
         <p>
-          <strong>Note:</strong> You can lock your session at any time with 
+          <b>Note:</b> You can lock your session at any time with 
           <code>loginctl lock-session</code> even when using Stasis without needing 
           <code>lock-command</code> in the config.
         </p>
@@ -614,6 +637,7 @@ end</code></pre>
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 0.9em;
     color: var(--text-primary);
+    word-break: break-all;
   }
   
   pre {
@@ -630,13 +654,14 @@ end</code></pre>
     background: none;
     padding: 0;
     font-size: 0.9rem;
+    word-break: normal;
   }
   
   @media (max-width: 968px) {
     .page-container {
       grid-template-columns: 1fr;
       gap: 20px;
-      padding: 20px 16px;
+      padding: 80px 16px 20px; /* Extra top padding for hamburger menu */
     }
     
     .links-nav {
@@ -648,22 +673,23 @@ end</code></pre>
     
     .nav-title {
       font-size: 0.8rem;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     
     .links-nav ul {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
     }
     
     .links-nav button {
       border-left: none;
       border-bottom: 2px solid transparent;
-      padding: 6px 12px;
-      font-size: 0.85rem;
+      padding: 10px 8px;
+      font-size: 0.75rem;
       background: var(--bg-secondary);
       border-radius: 6px;
+      text-align: center;
     }
     
     .links-nav button.active {
@@ -674,20 +700,94 @@ end</code></pre>
     
     h1 {
       font-size: 2rem;
+      margin-bottom: 24px;
     }
     
     h2 {
-      font-size: 1.5rem;
-      scroll-margin-top: 20px;
+      font-size: 1.4rem;
+      margin: 32px 0 12px 0;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
     }
     
     h3 {
-      font-size: 1.2rem;
+      font-size: 1.15rem;
+      margin: 24px 0 10px 0;
+    }
+    
+    section {
+      margin-bottom: 32px;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
+    }
+    
+    p {
+      font-size: 0.95rem;
+    }
+    
+    ul {
+      font-size: 0.95rem;
+      padding-left: 20px;
+    }
+    
+    .warning,
+    .info {
+      padding: 14px;
+      font-size: 0.9rem;
+    }
+    
+    .warning strong,
+    .info strong {
+      font-size: 0.95rem;
+    }
+    
+    code {
+      font-size: 0.85em;
     }
     
     pre {
       padding: 12px;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
+      margin: 12px 0;
+    }
+    
+    pre code {
+      font-size: 0.75rem;
+    }
+  }
+  
+  /* Extra small devices */
+  @media (max-width: 480px) {
+    .page-container {
+      padding: 70px 12px 20px;
+    }
+    
+    .links-nav ul {
+      grid-template-columns: 1fr;
+    }
+    
+    .links-nav button {
+      padding: 8px 10px;
+      font-size: 0.75rem;
+    }
+    
+    h1 {
+      font-size: 1.75rem;
+    }
+    
+    h2 {
+      font-size: 1.25rem;
+    }
+    
+    h3 {
+      font-size: 1.1rem;
+    }
+    
+    pre {
+      font-size: 0.7rem;
+      padding: 10px;
+    }
+    
+    pre code {
+      font-size: 0.7rem;
     }
   }
 </style>

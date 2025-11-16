@@ -10,6 +10,22 @@
   ];
   
   onMount(() => {
+    // Handle anchor links from other pages
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const element = document.getElementById(hash);
+      if (element) {
+        const topbarHeight = window.innerWidth <= 968 ? 0 : 70;
+        const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+        const offsetPosition = elementPosition - topbarHeight;
+        
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'instant'
+        });
+      }
+    }
+    
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -32,7 +48,7 @@
   function scrollToSection(id: string) {
     const element = document.getElementById(id);
     if (element) {
-      const topbarHeight = 70;
+      const topbarHeight = window.innerWidth <= 968 ? 80 : 70;
       const elementPosition = element.getBoundingClientRect().top + window.scrollY;
       const offsetPosition = elementPosition - topbarHeight;
       
@@ -282,7 +298,7 @@ cd stasis</code></pre>
     font-weight: 600;
     margin: 48px 0 16px 0;
     color: var(--text-primary);
-    scroll-margin-top: 120px;
+    scroll-margin-top: 70px;
   }
 
   h3 {
@@ -301,7 +317,7 @@ cd stasis</code></pre>
   
   section {
     margin-bottom: 48px;
-    scroll-margin-top: 120px;
+    scroll-margin-top: 70px;
   }
   
   p {
@@ -444,6 +460,7 @@ cd stasis</code></pre>
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 0.9em;
     color: var(--text-primary);
+    word-break: break-all;
   }
 
   pre {
@@ -460,13 +477,14 @@ cd stasis</code></pre>
     background: none;
     padding: 0;
     font-size: 0.9rem;
+    word-break: normal;
   }
 
   @media (max-width: 968px) {
     .page-container {
       grid-template-columns: 1fr;
       gap: 20px;
-      padding: 20px 16px;
+      padding: 80px 16px 20px; /* Extra top padding for hamburger menu */
     }
     
     .links-nav {
@@ -484,13 +502,13 @@ cd stasis</code></pre>
     .links-nav ul {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 8px;
     }
     
     .links-nav button {
       border-left: none;
       border-bottom: 2px solid transparent;
-      padding: 6px 12px;
+      padding: 10px 16px;
       font-size: 0.85rem;
       background: var(--bg-secondary);
       border-radius: 6px;
@@ -504,11 +522,30 @@ cd stasis</code></pre>
     
     h1 {
       font-size: 2rem;
+      margin-bottom: 24px;
     }
     
     h2 {
-      font-size: 1.5rem;
-      scroll-margin-top: 20px;
+      font-size: 1.4rem;
+      margin: 32px 0 12px 0;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
+    }
+
+    h3 {
+      font-size: 1.15rem;
+    }
+
+    h4 {
+      font-size: 1rem;
+    }
+
+    section {
+      margin-bottom: 32px;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
+    }
+
+    p {
+      font-size: 0.95rem;
     }
 
     .welcome-card {
@@ -521,14 +558,25 @@ cd stasis</code></pre>
 
     .contribution-grid {
       grid-template-columns: 1fr;
+      gap: 20px;
     }
 
     .contribution-card {
       padding: 20px;
     }
 
+    .card-icon {
+      font-size: 2rem;
+    }
+
+    .contribution-card ul {
+      font-size: 0.9rem;
+      padding-left: 18px;
+    }
+
     .step {
       gap: 16px;
+      margin-bottom: 24px;
     }
 
     .step-number {
@@ -537,9 +585,72 @@ cd stasis</code></pre>
       font-size: 1.1rem;
     }
 
+    .step-content p {
+      font-size: 0.9rem;
+    }
+
+    .info {
+      padding: 16px;
+      font-size: 0.9rem;
+    }
+
+    .info strong {
+      font-size: 1rem;
+    }
+
+    code {
+      font-size: 0.85em;
+    }
+
     pre {
       padding: 12px;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
+    }
+
+    pre code {
+      font-size: 0.8rem;
+    }
+  }
+
+  /* Extra small devices */
+  @media (max-width: 480px) {
+    .page-container {
+      padding: 70px 12px 20px;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+    }
+
+    .welcome-card {
+      padding: 16px;
+    }
+
+    .welcome-text {
+      font-size: 0.95rem;
+    }
+
+    .contribution-card {
+      padding: 16px;
+    }
+
+    .step-number {
+      width: 36px;
+      height: 36px;
+      font-size: 1rem;
+    }
+
+    pre {
+      font-size: 0.75rem;
+      padding: 10px;
+    }
+
+    pre code {
+      font-size: 0.75rem;
     }
   }
 </style>

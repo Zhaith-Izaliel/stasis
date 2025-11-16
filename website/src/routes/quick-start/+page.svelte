@@ -16,7 +16,7 @@
     if (hash) {
       const element = document.getElementById(hash);
       if (element) {
-        const topbarHeight = 70;
+        const topbarHeight = window.innerWidth <= 768 ? 0 : 70;
         const elementPosition = element.getBoundingClientRect().top + window.scrollY;
         const offsetPosition = elementPosition - topbarHeight;
         
@@ -49,7 +49,7 @@
   function scrollToSection(id: string) {
     const element = document.getElementById(id);
     if (element) {
-      const topbarHeight = 70;
+      const topbarHeight = window.innerWidth <= 768 ? 80 : 70;
       const elementPosition = element.getBoundingClientRect().top + window.scrollY;
       const offsetPosition = elementPosition - topbarHeight;
       
@@ -266,6 +266,7 @@ systemctl --user start stasis.service</code></pre>
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 0.9em;
     color: var(--text-primary);
+    word-break: break-all;
   }
   
   pre {
@@ -281,13 +282,14 @@ systemctl --user start stasis.service</code></pre>
     background: none;
     padding: 0;
     font-size: 0.9rem;
+    word-break: normal;
   }
   
   @media (max-width: 768px) {
     .page-container {
       grid-template-columns: 1fr;
       gap: 20px;
-      padding: 20px 16px;
+      padding: 80px 16px 20px; /* Extra top padding for hamburger menu */
     }
     
     .links-nav {
@@ -299,22 +301,23 @@ systemctl --user start stasis.service</code></pre>
     
     .nav-title {
       font-size: 0.8rem;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     
     .links-nav ul {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
     }
     
     .links-nav button {
       border-left: none;
       border-bottom: 2px solid transparent;
-      padding: 6px 12px;
-      font-size: 0.85rem;
+      padding: 10px 12px;
+      font-size: 0.8rem;
       background: var(--bg-secondary);
       border-radius: 6px;
+      text-align: center;
     }
     
     .links-nav button.active {
@@ -325,16 +328,66 @@ systemctl --user start stasis.service</code></pre>
     
     h1 {
       font-size: 2rem;
+      margin-bottom: 24px;
     }
     
     h2 {
-      font-size: 1.5rem;
-      scroll-margin-top: 20px;
+      font-size: 1.4rem;
+      margin: 32px 0 12px 0;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
+    }
+    
+    section {
+      margin-bottom: 32px;
+      scroll-margin-top: 100px; /* Account for hamburger menu */
+    }
+    
+    p {
+      font-size: 0.95rem;
+    }
+    
+    .warning,
+    .note {
+      padding: 12px;
+      font-size: 0.9rem;
+    }
+    
+    code {
+      font-size: 0.85em;
     }
     
     pre {
       padding: 12px;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
+      margin: 12px 0;
+    }
+    
+    pre code {
+      font-size: 0.8rem;
+    }
+  }
+  
+  /* Extra small devices */
+  @media (max-width: 480px) {
+    .page-container {
+      padding: 70px 12px 20px;
+    }
+    
+    .links-nav ul {
+      grid-template-columns: 1fr;
+    }
+    
+    .links-nav button {
+      padding: 8px 10px;
+      font-size: 0.75rem;
+    }
+    
+    h1 {
+      font-size: 1.75rem;
+    }
+    
+    h2 {
+      font-size: 1.25rem;
     }
   }
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { base } from '$app/paths';
   
-  import stasisLogo from '$lib/assets/stasis.png';
+  import stasisLogo from '$lib/assets/favicon.png';
 </script>
 
 <div class="hero">
@@ -76,7 +76,13 @@
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(201, 42, 42, 0.05) 100%);
-    padding: 60px 20px;
+    padding: 40px 20px;
+    width: 100%;
+  }
+
+  .hero {
+    margin-left: 50%;
+    transform: translateX(-50%);
   }
 
   .hero-content {
@@ -251,73 +257,121 @@
     margin: 0;
   }
 
-  .badges {
-    padding: 40px 20px 80px;
-    text-align: center;
-  }
-
-  .badge-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .badge-container img {
-    height: 20px;
-  }
-
-  @media (max-width: 768px) {
+  /* Tablet and Mobile */
+  @media (max-width: 1024px) {
+    :global(.content > .hero) {
+      margin: -1rem;
+      margin-top: -4rem;
+    }
+    
     .hero {
-      min-height: auto;
-      padding: 40px 20px;
+      min-height: 100vh;
+      padding: 100px 20px 40px;
     }
 
     .logo {
-      width: 120px;
-      height: 120px;
+      width: 140px;
+      height: 140px;
       margin-bottom: 24px;
     }
 
     h1 {
-      font-size: 3rem;
+      font-size: 2.5rem;
       letter-spacing: -1px;
+      margin-bottom: 16px;
     }
 
     .tagline {
-      font-size: 1.2rem;
+      font-size: 1.1rem;
+      margin-bottom: 12px;
     }
 
     .subtitle {
-      font-size: 1rem;
+      font-size: 0.95rem;
+      margin-bottom: 32px;
     }
 
     .cta-buttons {
       flex-direction: column;
       align-items: stretch;
+      gap: 12px;
     }
 
     .btn {
       justify-content: center;
+      padding: 12px 24px;
+      font-size: 1rem;
     }
 
     .discord-banner {
       flex-wrap: wrap;
       justify-content: center;
+      font-size: 0.9rem;
+      padding: 10px 20px;
     }
 
     .features {
-      padding: 40px 20px;
+      padding: 40px 16px;
     }
 
     .feature-grid {
       grid-template-columns: 1fr;
-      gap: 24px;
+      gap: 20px;
     }
 
     .feature-card {
       padding: 24px;
+    }
+
+    .feature-icon {
+      font-size: 2.5rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1.2rem;
+    }
+
+    .feature-card p {
+      font-size: 0.9rem;
+    }
+  }
+
+  /* Extra small devices */
+  @media (max-width: 480px) {
+    .hero {
+      padding: 90px 16px 32px;
+    }
+
+    .logo {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+    }
+
+    .tagline {
+      font-size: 1rem;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      font-size: 0.95rem;
+      padding: 10px 20px;
+    }
+
+    .discord-banner {
+      font-size: 0.85rem;
+      padding: 8px 16px;
+    }
+
+    .feature-card {
+      padding: 20px;
     }
   }
 </style>
