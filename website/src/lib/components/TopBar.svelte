@@ -113,8 +113,9 @@
   }
 
   .topbar {
-    position: sticky;
+    position: fixed;
     top: 0;
+    width: 100%;
     z-index: 100;
     display: grid;
     grid-template-columns: auto 1fr auto;
