@@ -9,15 +9,18 @@ default_timeout 300  # 5 minute(s)
 #
 stasis:
   pre_suspend_command "hyprlock"
+
   monitor_media true
   ignore_remote_media true
-  # Stasis allows you to define a list of media
-  # players that you want to be ignored when inhibiting
-  # media playback
+  # Stasis allows you to define a list of media players that you want
+  # to ignore when inhibiting Stasis based on media playback
   #media_blacklist ["spotify"]
+  
   respect_idle_inhibitors true
+  
   #lid_close_action "lock-screen" (lock-screen | suspend | custom | ignore)
   #lid_open_action "wake" (wake | custom | ignore)
+  
   # debounce: default is 3s; can be customized if needed
   #debounce-seconds 4
 
@@ -41,7 +44,7 @@ stasis:
   dpms:
     timeout 60  # 1 minute(s)
     command "niri msg action power-off-monitors"
-    resume-command "niri.msg action power-on-monitors"
+    resume-command "niri msg action power-on-monitors"
   end
 
   suspend:
