@@ -10,9 +10,7 @@ impl StasisConfig {
         is_manually_inhibited: Option<bool>,
     ) -> String {
         let mut out = String::new();
-
         out.push_str("Status:\n");
-
         if let Some(idle) = idle_time {
             out.push_str(&format!("  IdleTime           = {}\n", utils::format_duration(idle)));
         }
@@ -25,7 +23,6 @@ impl StasisConfig {
         if let Some(inhibited) = is_manually_inhibited {
             out.push_str(&format!("  ManuallyInhibited  = {}\n", inhibited));
         }
-
         // General settings
         out.push_str("\nConfig:\n");
         out.push_str(&format!(
@@ -44,7 +41,6 @@ impl StasisConfig {
         out.push_str(&format!("  DebounceSeconds    = {}\n", self.debounce_seconds));
         out.push_str(&format!("  LidCloseAction     = {}\n", self.lid_close_action));
         out.push_str(&format!("  LidOpenAction      = {}\n", self.lid_open_action));
-
         let apps = if self.inhibit_apps.is_empty() {
             "-".to_string()
         } else {
@@ -55,12 +51,8 @@ impl StasisConfig {
                 .join(",")
         };
         out.push_str(&format!("  InhibitApps        = {}\n", apps));
-
-
-
         // Actions
         out.push_str("\nActions:\n");
-
         // Track groups in order of first occurrence
         let mut seen_groups = BTreeSet::new();
         for action in &self.actions {
@@ -71,27 +63,29 @@ impl StasisConfig {
             } else {
                 "Desktop"
             };
-
             // Print group header only once
             if seen_groups.insert(group) {
                 out.push_str(&format!("  [{}]\n", group));
             }
-
+            
+            // Strip the prefix from the action name for display
+            let display_name = action.name
+                .strip_prefix("ac.")
+                .or_else(|| action.name.strip_prefix("battery."))
+                .unwrap_or(&action.name);
+            
             out.push_str(&format!(
                 "    {:<20} Timeout={} Kind={} Command=\"{}\"",
-                action.name,
+                display_name,
                 action.timeout,
                 action.kind,
                 action.command
             ));
-
             if let Some(resume_cmd) = &action.resume_command {
                 out.push_str(&format!(" ResumeCommand=\"{}\"", resume_cmd));
             }
-
             out.push('\n');
         }
-
         out
     }
 }

@@ -10,6 +10,13 @@ use crate::{
     log::log_message,
 };
 
+/// Helper function to strip ac. or battery. prefix from action names
+fn strip_action_prefix(name: &str) -> &str {
+    name.strip_prefix("ac.")
+        .or_else(|| name.strip_prefix("battery."))
+        .unwrap_or(name)
+}
+
 pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) -> Result<String, String> {
     let normalized = name.replace('_', "-").to_lowercase();
     let mut mgr = manager.lock().await;
@@ -19,7 +26,25 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         return Ok("pre_suspend".to_string());
     }
 
-    let block = if !mgr.state.ac_actions.is_empty() || !mgr.state.battery_actions.is_empty() {
+    // Check if user is explicitly targeting a specific block (e.g., "ac.dim" or "battery.suspend")
+    let (target_block, search_name) = if normalized.starts_with("ac.") {
+        (Some("ac"), normalized.strip_prefix("ac.").unwrap())
+    } else if normalized.starts_with("battery.") {
+        (Some("battery"), normalized.strip_prefix("battery.").unwrap())
+    } else {
+        (None, normalized.as_str())
+    };
+
+    // Determine which block to search
+    let block = if let Some(explicit_block) = target_block {
+        // User explicitly specified ac. or battery.
+        match explicit_block {
+            "ac" => &mgr.state.ac_actions,
+            "battery" => &mgr.state.battery_actions,
+            _ => &mgr.state.default_actions,
+        }
+    } else if !mgr.state.ac_actions.is_empty() || !mgr.state.battery_actions.is_empty() {
+        // Auto-detect based on current power state
         match mgr.state.on_battery() {
             Some(true) => &mgr.state.battery_actions,
             Some(false) => &mgr.state.ac_actions,
@@ -31,13 +56,16 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
 
     let action_opt = block.iter().find(|a| {
         let kind_name = format!("{:?}", a.kind).to_lowercase().replace('_', "-");
-        kind_name == normalized || a.name.to_lowercase() == normalized
+        let stripped_name = strip_action_prefix(&a.name).to_lowercase();
+        kind_name == search_name || stripped_name == search_name || a.name.to_lowercase() == search_name
     });
 
     let action = match action_opt {
         Some(a) => a.clone(),
         None => {
-            let mut available: Vec<String> = block.iter().map(|a| a.name.clone()).collect();
+            let mut available: Vec<String> = block.iter()
+                .map(|a| strip_action_prefix(&a.name).to_string())
+                .collect();
             if mgr.state.pre_suspend_command.is_some() {
                 available.push("pre_suspend".to_string());
             }
@@ -50,7 +78,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         }
     };
 
-    log_message(&format!("Action triggered: '{}'", action.name));
+    log_message(&format!("Action triggered: '{}'", strip_action_prefix(&action.name)));
     let is_lock = matches!(action.kind, crate::config::model::IdleAction::LockScreen);
 
     if is_lock {
@@ -144,7 +172,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         run_action(&mut mgr, &action).await;
     }
 
-    Ok(action.name)
+    Ok(strip_action_prefix(&action.name).to_string())
 }
 
 pub async fn list_available_actions(manager: Arc<Mutex<Manager>>) -> Vec<String> {
@@ -153,7 +181,7 @@ pub async fn list_available_actions(manager: Arc<Mutex<Manager>>) -> Vec<String>
         .state
         .default_actions
         .iter()
-        .map(|a| a.name.clone())
+        .map(|a| strip_action_prefix(&a.name).to_string())
         .collect::<Vec<_>>();
 
     if mgr.state.pre_suspend_command.is_some() {
