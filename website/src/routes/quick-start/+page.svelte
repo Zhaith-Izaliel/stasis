@@ -64,17 +64,17 @@
   
   const systemdServiceCode = `[Unit]
 Description=Stasis Wayland Idle Manager
-After=default.target
+PartOf=graphical-session.target
+After=graphical-session.target
 ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
-Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$HOME/.local/bin/stasis
+ExecStart=/usr/bin/stasis
 Restart=on-failure
 
 [Install]
-WantedBy=default.target`; 
+WantedBy=graphical-session.target`; 
   
   const enableServiceCode = `# Reload systemd to recognize the new service
 systemctl --user daemon-reload
@@ -270,10 +270,7 @@ ls -la /run/user/$(id -u)/wayland-*" />
 exec-once = sleep 2 && stasis
 
 # Niri example:
-spawn-at-startup "sh" "-c" "sleep 2 && stasis"`} />
-      <p>
-        The <code>sleep 2</code> gives the compositor time to fully initialize its environment.
-      </p>
+spawn-at-startup "stasis"`} />
     </section>
   </main>
 </div>

@@ -5,10 +5,9 @@ After=graphical-session.target
 ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
+type=simple
 ExecStart=/usr/bin/stasis
-Slice=session.slice
 Restart=on-failure
-TimeoutStopSec=5s
 
 [Install]
 WantedBy=graphical-session.target
