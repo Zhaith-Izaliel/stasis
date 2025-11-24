@@ -62,48 +62,27 @@
     }
   }
   
-  const hyprlandServiceCode = `[Unit]
-Description=Stasis Wayland Idle Manager (Hyprland)
-After=hyprland-session.target
-PartOf=hyprland-session.target
+  const systemdServiceCode = `[Unit]
+Description=Stasis Wayland Idle Manager
+After=graphical.target
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/stasis
 Restart=on-failure
-RestartSec=3
 
-ExecStartPre=/usr/bin/systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+# Optional: ensure environment variables for Wayland are loaded
+ExecStartPre=/usr/bin/systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
 ExecStartPre=/bin/sh -c 'until [ -n "$WAYLAND_DISPLAY" ]; do sleep 0.5; done'
 
 [Install]
-WantedBy=hyprland-session.target`;
-
-  const niriServiceCode = `[Unit]
-Description=Stasis Wayland Idle Manager (Niri)
-After=niri.service
-PartOf=niri.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/stasis
-Restart=on-failure
-RestartSec=3
-
-ExecStartPre=/usr/bin/systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
-ExecStartPre=/bin/sh -c 'until [ -n "$WAYLAND_DISPLAY" ]; do sleep 0.5; done'
-
-[Install]
-WantedBy=niri.service`;
+WantedBy=default.target`; 
   
   const enableServiceCode = `# Reload systemd to recognize the new service
 systemctl --user daemon-reload
 
 # Enable and start the service
-systemctl --user enable --now stasis.service
-
-# Check the service status
-systemctl --user status stasis.service`;
+systemctl --user enable --now stasis.service`;
 </script>
 
 <div class="page-container">
@@ -196,24 +175,15 @@ systemctl --user status stasis.service`;
         Stasis starts automatically with your graphical session and restarts if it crashes.
       </p>
       
-      <div class="note">
-        <strong>📝 Compositor-Specific:</strong> The service file must match your compositor. 
-        Choose the appropriate example below for your setup.
-      </div>
-      
       <h3>Create the Service File</h3>
       <p>
-        Create a service file at <code>~/.config/systemd/user/stasis.service</code> with the content for your compositor:
+        Create a service file at <code>~/.config/systemd/user/stasis.service</code> with this content:
       </p>
       
-      <h4>Hyprland</h4>
-      <CodeBlock code={hyprlandServiceCode} language="ini" />
-      
-      <h4>Niri</h4>
-      <CodeBlock code={niriServiceCode} language="ini" />
+      <CodeBlock code={systemdServiceCode} language="ini" />
       
       <div class="note">
-        <strong>📝 Path Note:</strong> The service files use <code>/usr/bin/stasis</code> as the default path. 
+        <strong>Path Note:</strong> The service files use <code>/usr/bin/stasis</code> as the default path. 
         If you installed Stasis to a different location (e.g., <code>~/.local/bin/stasis</code>), 
         update the <code>ExecStart=</code> line accordingly.
       </div>
@@ -223,9 +193,10 @@ systemctl --user status stasis.service`;
       <CodeBlock code={enableServiceCode} language="bash" />
       
       <p>
-        If the service is running correctly, you should see <code>Active: active (running)</code> 
-        in the status output.
+        Now start Stasis from your compositors autostart section 
+        e.g. for Hyprland:
       </p>
+      <CodeBlock code="exec-once = systemctl --user start stasis" />
     </section>
     
     <section id="troubleshooting">
