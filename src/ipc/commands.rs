@@ -307,9 +307,25 @@ pub async fn pause_for_duration(
     // Spawn a task to auto-resume after duration
     tokio::spawn(async move {
         sleep(duration).await;
+        
         let mut mgr = manager.lock().await;
-        mgr.resume(true).await;
-        log_message(&format!("Auto-resuming after {} pause", time_str_clone));
+        
+        // Only clear the manual pause flag
+        if mgr.state.manually_paused {
+            mgr.state.manually_paused = false;
+            
+            // Check if we should actually unpause based on inhibitor count
+            if mgr.state.active_inhibitor_count == 0 {
+                mgr.state.paused = false;
+                log_message(&format!("Auto-resuming after {} pause", time_str_clone));
+            } else {
+                log_message(&format!(
+                    "Auto-resume timer expired after {} but {} inhibitor(s) still active - timers remain paused",
+                    time_str_clone,
+                    mgr.state.active_inhibitor_count
+                ));
+            }
+        }
     });
 
     Ok(format!("Paused for {}", time_str))
