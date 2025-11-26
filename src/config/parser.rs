@@ -28,6 +28,7 @@ fn is_special_key(key: &str) -> bool {
             | "respect_wayland_inhibitors" | "respect-wayland-inhibitors"
             | "inhibit_apps" | "inhibit-apps"
             | "debounce_seconds" | "debounce-seconds"
+            | "notify_on_unpause" | "notify-on-unpause"
     )
 }
 
@@ -188,6 +189,11 @@ pub fn load_config() -> Result<StasisConfig> {
         .or_else(|_| config.get::<bool>("stasis.respect-wayland-inhibitors"))
         .unwrap_or(true);
 
+    let notify_on_unpause = config
+        .get::<bool>("stasis.notify_on_unpause")
+        .or_else(|_| config.get::<bool>("stasis.notify-on-unpause"))
+        .unwrap_or(false);
+
     let lid_close_action = config
         .get::<String>("stasis.lid_close_action")
         .or_else(|_| config.get::<String>("stasis.lid-close-action"))
@@ -292,6 +298,7 @@ pub fn load_config() -> Result<StasisConfig> {
         media_blacklist.join(", ")
     ));
     log_message(&format!("  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors));
+    log_message(&format!("  notify_on_unpause = {:?}", notify_on_unpause));
     log_message(&format!("  debounce_seconds = {:?}", debounce_seconds));
     log_message(&format!("  lid_close_action = {:?}", lid_close_action));
     log_message(&format!("  lid_open_action = {:?}", lid_open_action));
@@ -326,5 +333,6 @@ pub fn load_config() -> Result<StasisConfig> {
         debounce_seconds,
         lid_close_action,
         lid_open_action,
+        notify_on_unpause,
     })
 }

@@ -48,6 +48,10 @@ impl StasisConfig {
             "  RespectInhibitors  = {}\n",
             if self.respect_wayland_inhibitors { "true" } else { "false" }
         ));
+        out.push_str(&format!(
+            "  NotifyOnUnpause    = {}\n",
+            if self.notify_on_unpause { "true" } else { "false" }
+        ));
         out.push_str(&format!("  DebounceSeconds    = {}\n", self.debounce_seconds));
         out.push_str(&format!("  LidCloseAction     = {}\n", self.lid_close_action));
         out.push_str(&format!("  LidOpenAction      = {}\n", self.lid_open_action));

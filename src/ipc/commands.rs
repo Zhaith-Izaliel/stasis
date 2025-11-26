@@ -318,6 +318,16 @@ pub async fn pause_for_duration(
             if mgr.state.active_inhibitor_count == 0 {
                 mgr.state.paused = false;
                 log_message(&format!("Auto-resuming after {} pause", time_str_clone));
+           
+                // Send notification if user config allows
+                if let Some(cfg) = &mgr.state.cfg {
+                    if cfg.notify_on_unpause {
+                        send_notification(
+                            "Stasis resumed",
+                            &format!("Timers auto-resumed after {}", time_str_clone)
+                        ).await;
+                    }
+                }
             } else {
                 log_message(&format!(
                     "Auto-resume timer expired after {} but {} inhibitor(s) still active - timers remain paused",
@@ -329,6 +339,18 @@ pub async fn pause_for_duration(
     });
 
     Ok(format!("Paused for {}", time_str))
+}
+
+async fn send_notification(summary: &str, body: &str) {
+    if let Err(e) = tokio::process::Command::new("notify-send")
+        .arg("-a")
+        .arg("stasis")
+        .arg(summary)
+        .arg(body)
+        .spawn()
+    {
+        log_message(&format!("Failed to send notification: {}", e));
+    }
 }
 
 #[cfg(test)]

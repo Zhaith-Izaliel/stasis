@@ -92,7 +92,8 @@ pub struct StasisConfig {
     pub pre_suspend_command: Option<String>,
     pub respect_wayland_inhibitors: bool,
     pub lid_close_action: LidCloseAction,
-    pub lid_open_action: LidOpenAction
+    pub lid_open_action: LidOpenAction,
+    pub notify_on_unpause: bool,
 }
 
 impl std::fmt::Display for LidCloseAction {
