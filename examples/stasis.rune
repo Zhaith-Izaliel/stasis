@@ -1,7 +1,7 @@
 @author "Dustin Pilgrim"
 @description "Stasis configuration file"
 
-# global variable
+# global variable, can be re-used in your config
 default_timeout 300  # 5 minute(s)
 
 #
@@ -9,20 +9,31 @@ default_timeout 300  # 5 minute(s)
 #
 stasis:
   pre_suspend_command "hyprlock"
-
   monitor_media true
   ignore_remote_media true
   # Stasis allows you to define a list of media players that you want
   # to ignore when inhibiting Stasis based on media playback
-  #media_blacklist ["spotify"]
-  
+  #media_blacklist ["spotify"] 
   respect_idle_inhibitors true
+ 
+  # For laptops:
+  #
+  # you can specify an action to do on lid close/open
+  # lid_close_action:
+  #   can be one of: lock-screen | suspend | custom | ignore
+  #
+  # lid_open_action:
+  #   can be one of: wake | custom | ignore
+  #
+  #lid_close_action "lock-screen"
+  #lid_open_action "wake"
   
-  #lid_close_action "lock-screen" (lock-screen | suspend | custom | ignore)
-  #lid_open_action "wake" (wake | custom | ignore)
-  
-  # debounce: default is 3s; can be customized if needed
+  # debounce: default is 0s; can be customized if needed
   #debounce-seconds 4
+
+  # enable notifications when Stasis unpauses from stasis pause <duration>
+  # run stasis pause help for more information
+  #notify_on_unpause true
 
   inhibit_apps [
     "vlc"
@@ -55,9 +66,10 @@ stasis:
 
   # laptop-only AC actions
   on_ac:
-
-    # Step 1: Adjust brightness (instant)
-    # define it first so it does not retrigger later
+    # define an instant action by giving it a timeout of 0
+    # these actions run when stasis first starts depending on
+    # your current action block (i.e. ac or battery) OR if you change
+    # from ac -> battery OR battery -> ac
     custom-brightness-instant:
       timeout 0  # 0 second(s)
       command "brightnessctl set 100%"
