@@ -28,9 +28,6 @@ impl StasisConfig {
             .max()
             .unwrap_or(0);
         
-        // Pipe position = 2 spaces indent + max_label + 1 space
-        let pipe_pos = 2 + max_label + 1;
-        
         // Status section
         out.push_str("◆ STATUS\n");
         
