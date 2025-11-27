@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod pause;
 
 use std::sync::Arc;
 use tokio::{
@@ -44,7 +45,6 @@ pub async fn spawn_ipc_socket_with_listener(
 
                                     let response = match cmd.as_str() {
                                         // === CONFIG ===
-
                                         "reload" => {
                                             match config::parser::load_config() {
                                                 Ok(new_cfg) => {
@@ -101,21 +101,17 @@ pub async fn spawn_ipc_socket_with_listener(
                                             }
                                         }
  
+                                        // === PAUSE/RESUME ===
                                         cmd if cmd.starts_with("pause") => {
-                                            let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                            let args = cmd.strip_prefix("pause").unwrap_or("").trim();
                                             
-                                            if parts.len() == 1 {
-                                                // Simple "pause" with no duration
-                                                let mut mgr = manager.lock().await;
-                                                mgr.pause(true).await;
-                                                "Idle manager paused".to_string()
+                                            // Check for help
+                                            if args.eq_ignore_ascii_case("help") 
+                                                || args == "-h" 
+                                                || args == "--help" {
+                                                pause::PAUSE_HELP_MESSAGE.to_string()
                                             } else {
-                                                // "pause 5m" or "pause 1h 30m" etc.
-                                                let duration_str = parts[1..].join(" ");
-                                                match crate::ipc::commands::pause_for_duration(
-                                                    manager.clone(), 
-                                                    &duration_str
-                                                ).await {
+                                                match pause::handle_pause_command(manager.clone(), args).await {
                                                     Ok(msg) => msg,
                                                     Err(e) => format!("ERROR: {}", e),
                                                 }
@@ -128,6 +124,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                             "Idle manager resumed".to_string()
                                         }
 
+                                        // === TRIGGER ACTIONS ===
                                         cmd if cmd.starts_with("trigger ") => {
                                             let step = cmd.strip_prefix("trigger ").unwrap_or("").trim();
 
@@ -147,6 +144,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                             }
                                         }
 
+                                        // === CONTROL ===
                                         "stop" => {
                                             log_message("Received stop command — shutting down gracefully");
                                             let manager_clone = Arc::clone(&manager);
@@ -189,6 +187,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                             response.to_string()
                                         }
 
+                                        // === INFO ===
                                         "info" | "info --json" => {
                                             let as_json = cmd.contains("--json");
 

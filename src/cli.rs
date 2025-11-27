@@ -20,9 +20,14 @@ pub enum Command {
     #[command(about = "Reload the configuration without restarting Stasis")]
     Reload,
     
-    #[command(about = "Pause all timers indefinitely or for a specific duration")]
+    #[command(about = "Pause all timers indefinitely, for a duration, or until a time", disable_help_flag = true)]
     Pause {
-        duration: Option<String>,
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Optional: 'for <duration>' (e.g., 'for 5m') or 'until <time>' (e.g., 'until 1:30pm')"
+        )]
+        args: Vec<String>,
     },
     
     #[command(about = "Resume timers after a pause")]
@@ -48,4 +53,11 @@ pub enum Command {
         #[arg(long, help = "Output as JSON (for Waybar or scripts)")]
         json: bool,
     },
+}
+
+impl Command {
+    /// Helper to convert the pause args vec into a single string for IPC
+    pub fn pause_args_to_string(args: &[String]) -> String {
+        args.join(" ")
+    }
 }

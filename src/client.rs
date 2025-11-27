@@ -14,7 +14,7 @@ pub async fn handle_client_command(cmd: &Command) -> Result<()> {
         Command::Info { json } => handle_info(*json).await,
         Command::Trigger { step } => handle_trigger(step).await,
         Command::ListActions => handle_list_actions().await,
-        Command::Pause { duration } => handle_pause(duration.as_deref()).await,
+        Command::Pause { args } => handle_pause(args).await,
         Command::Reload => handle_simple_command("reload", "Configuration reloaded successfully").await,
         Command::Resume => handle_simple_command("resume", "Idle timers resumed").await,
         Command::Stop => handle_simple_command("stop", "Stasis daemon stopped").await,
@@ -110,11 +110,21 @@ async fn handle_list_actions() -> Result<()> {
     Ok(())
 }
 
-async fn handle_pause(duration: Option<&str>) -> Result<()> {
-    let msg = if let Some(dur) = duration {
-        format!("pause {}", dur)
-    } else {
+async fn handle_pause(args: &[String]) -> Result<()> {
+    // Check for help flags before sending to daemon
+    if !args.is_empty() {
+        let first_arg = args[0].as_str();
+        if first_arg == "help" || first_arg == "--help" || first_arg == "-h" {
+            println!("{}", crate::ipc::pause::PAUSE_HELP_MESSAGE);
+            return Ok(());
+        }
+    }
+
+    // Build the pause command from args
+    let msg = if args.is_empty() {
         "pause".to_string()
+    } else {
+        format!("pause {}", args.join(" "))
     };
 
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
@@ -202,4 +212,3 @@ async fn handle_simple_command(command: &str, success_msg: &str) -> Result<()> {
     }
     Ok(())
 }
-
