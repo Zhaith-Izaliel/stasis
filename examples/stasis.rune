@@ -31,7 +31,10 @@ stasis:
   # debounce: default is 0s; can be customized if needed
   #debounce-seconds 4
 
-  # enable notifications when Stasis unpauses from stasis pause <duration>
+  # enable notifications when Stasis unpauses from 
+  # `stasis pause for <DURATION>`
+  #  or
+  #  `stasis pause until <TIME>`
   # run stasis pause help for more information
   #notify_on_unpause true
 
