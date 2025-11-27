@@ -7,9 +7,21 @@ use zbus::{Connection, MatchRule, MessageStream};
 
 use crate::core::manager::{helpers::{decr_active_inhibitor, incr_active_inhibitor}, Manager};
 
-const IGNORED_PLAYERS: &[&str] = &[
-    "KDE Connect", "kdeconnect", "Chromecast", "chromecast",
-    "Spotify Connect", "spotifyd", "vlc-http", "plexamp", "bluez",
+// Players that are always considered local (browsers, local video players)
+// For these, we trust MPRIS even without audio output (handles muted tabs)
+const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
+    "firefox",
+    "chrome",
+    "chromium",
+    "brave",
+    "opera",
+    "vivaldi",
+    "edge",
+    "safari",
+    "mpv",
+    "vlc",
+    "totem",
+    "celluloid",
 ];
 
 pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<()> {
@@ -45,7 +57,6 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
 
             let playing = check_media_playing(ignore_remote_media, &media_blacklist);
             if playing {
-                // use manager helper to ensure consistent side-effects/logging
                 let mut mgr = manager.lock().await;
                 if !mgr.state.media_playing {
                     incr_active_inhibitor(&mut mgr).await;
@@ -83,69 +94,91 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
 }
 
 pub fn check_media_playing(ignore_remote_media: bool, media_blacklist: &[String]) -> bool {
-    // Step 1: Check if ANY MPRIS player is playing (filter blacklist and remote)
-    let any_mpris_playing = match PlayerFinder::new() {
+    // Get all playing MPRIS players
+    let playing_players = match PlayerFinder::new() {
         Ok(finder) => match finder.find_all() {
             Ok(players) => {
-                players.iter().any(|player| {
-                    let is_playing = player.get_playback_status()
+                players.into_iter().filter(|player| {
+                    player.get_playback_status()
                         .map(|s| s == PlaybackStatus::Playing)
-                        .unwrap_or(false);
-                    
-                    if !is_playing {
-                        return false;
-                    }
-                    
-                    let identity = player.identity().to_lowercase();
-                    let bus_name = player.bus_name().to_string().to_lowercase();
-                    
-                    // Check blacklist first (applies regardless of ignore_remote_media)
-                    if media_blacklist.iter().any(|b| identity.contains(b) || bus_name.contains(b)) {
-                        return false;
-                    }
-                    
-                    // If ignore_remote_media is true, also filter remote players
-                    if ignore_remote_media {
-                        let is_remote = IGNORED_PLAYERS.iter().any(|s| {
-                            let s_lower = s.to_lowercase();
-                            identity.contains(&s_lower) || bus_name.contains(&s_lower)
-                        });
-                        !is_remote
-                    } else {
-                        true
-                    }
-                })
+                        .unwrap_or(false)
+                }).collect::<Vec<_>>()
             },
-            Err(_) => false,
+            Err(_) => Vec::new(),
         },
-        Err(_) => false,
+        Err(_) => Vec::new(),
     };
 
-    // If no MPRIS player is playing at all, return false
-    if !any_mpris_playing {
+    if playing_players.is_empty() {
         return false;
     }
 
-    // Step 2: If we're ignoring remote media, verify local audio is actually playing
-    if ignore_remote_media {
-        check_local_audio()
-    } else {
-        // If we're not filtering remote media, any MPRIS player is enough
-        true
+    // Check each player
+    for player in playing_players {
+        let identity = player.identity().to_lowercase();
+        let bus_name = player.bus_name().to_string().to_lowercase();
+        let combined = format!("{} {}", identity, bus_name);
+        
+        // Check user's custom blacklist (always applies)
+        let is_blacklisted = media_blacklist.iter().any(|b| {
+            let b_lower = b.to_lowercase();
+            combined.contains(&b_lower)
+        });
+        
+        if is_blacklisted {
+            continue;
+        }
+        
+        // Check if this is a browser or local video player
+        let is_always_local = ALWAYS_LOCAL_PLAYERS.iter().any(|local| {
+            combined.contains(local)
+        });
+        
+        if is_always_local {
+            // Browsers/video players are always considered local
+            // This handles muted YouTube tabs - they're still playing locally
+            return true;
+        }
+        
+        // For other players (Spotify, music players, etc.):
+        // - If NOT filtering remote: accept immediately
+        // - If filtering remote: verify with audio check
+        if ignore_remote_media {
+            // Check if there's actual audio output
+            // This distinguishes:
+            //   - Local playback (Spotify on desktop) = HAS sink-inputs
+            //   - Remote playback (Spotify Connect, KDE Connect) = NO sink-inputs
+            if has_any_audio_output() {
+                return true;
+            }
+            // No audio output = remote playback, continue checking other players
+        } else {
+            // Not filtering remote media, accept this player
+            return true;
+        }
     }
+    
+    false
 }
 
-fn check_local_audio() -> bool {
-    // Small delay to allow sink state to update after MPRIS detection
+fn has_any_audio_output() -> bool {
+    // Small delay to allow audio state to settle after MPRIS state change
     std::thread::sleep(std::time::Duration::from_millis(300));
     
-    let output = match Command::new("pactl").args(["list", "sinks", "short"]).output() {
+    // Check if there are ANY active sink-inputs
+    // This is the key to detecting remote vs local:
+    //   - Spotify playing locally: Creates sink-input
+    //   - Spotify Connect (playing on phone): NO sink-input
+    //   - KDE Connect (forwarding phone playback): NO sink-input
+    let output = match Command::new("pactl")
+        .args(["list", "sink-inputs", "short"])
+        .output() {
         Ok(o) => o,
         Err(_) => return false,
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     
-    // Check if any sink is in RUNNING state
-    stdout.lines().any(|line| line.to_uppercase().contains("RUNNING"))
+    // If there's any output, something is playing audio locally
+    !stdout.trim().is_empty()
 }

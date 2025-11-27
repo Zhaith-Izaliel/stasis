@@ -1425,6 +1425,7 @@ dependencies = [
  "dirs",
  "eyre",
  "futures",
+ "futures-executor",
  "futures-util",
  "input",
  "libc",
@@ -1442,6 +1443,7 @@ dependencies = [
  "wayland-protocols-wlr",
  "zbus",
  "zbus_macros",
+ "zbus_names",
  "zvariant",
 ]
 
