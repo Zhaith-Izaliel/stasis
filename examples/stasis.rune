@@ -1,12 +1,14 @@
+# metadata (not required to keet)
 @author "Dustin Pilgrim"
 @description "Stasis configuration file"
 
 # global variable, can be re-used in your config
 default_timeout 300  # 5 minute(s)
 
-#
-# Stasis configuration
-#
+# Everything related to your configuration goes under this block
+# stasis:
+# ...
+# end
 stasis:
   pre_suspend_command "hyprlock"
   monitor_media true
