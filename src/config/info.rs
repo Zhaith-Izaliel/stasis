@@ -10,12 +10,13 @@ impl StasisConfig {
         is_manually_paused: Option<bool>,
         app_blocking: Option<bool>,
         media_blocking: Option<bool>,
+        media_bridge_active: Option<bool>,
     ) -> String {
         let mut out = String::new();
         
         // Calculate the global pipe position
         // Find the longest label across all sections
-        let status_labels = vec!["Idle Time", "Uptime", "Paused", "Manually Paused", "App Blocking", "Media Blocking"];
+        let status_labels = vec!["Idle Time", "Uptime", "Paused", "Manually Paused", "App Blocking", "Media Blocking", "Media Bridge"];
         let config_labels = vec!["PreSuspendCommand", "MonitorMedia", "IgnoreRemoteMedia", 
                                  "RespectInhibitors", "NotifyOnUnpause", "NotifyBeforeAction",
                                  "NotifySecondsBefore", "DebounceSeconds",
@@ -53,6 +54,10 @@ impl StasisConfig {
         if let Some(media_paused) = media_blocking {
             let indicator = if media_paused { "●" } else { "○" };
             out.push_str(&format!("  {:<width$} │ {} {}\n", "Media Blocking", indicator, media_paused, width = max_label));
+        }
+        if let Some(bridge_active) = media_bridge_active {
+            let indicator = if bridge_active { "●" } else { "○" };
+            out.push_str(&format!("  {:<width$} │ {} {}\n", "Media Bridge", indicator, bridge_active, width = max_label));
         }
         
         out.push('\n');

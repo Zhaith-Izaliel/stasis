@@ -57,6 +57,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                     let manually_inhibited = mgr.state.manually_paused;
                                                     let paused = mgr.state.paused;
                                                     let media_blocking = mgr.state.media_blocking;
+                                                    let media_bridge_active = mgr.state.media_bridge_active;
                                                     let cfg_clone = mgr.state.cfg.clone();
                                                     
                                                     drop(mgr);
@@ -77,6 +78,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         Err(_) => false,
                                                     };
 
+
                                                     log_message("Config reloaded successfully");
                                                     
                                                     if let Some(cfg) = &cfg_clone {
@@ -88,7 +90,8 @@ pub async fn spawn_ipc_socket_with_listener(
                                                                 Some(paused),
                                                                 Some(manually_inhibited),
                                                                 Some(app_blocking),
-                                                                Some(media_blocking)
+                                                                Some(media_blocking),
+                                                                Some(media_bridge_active)
                                                             )
                                                         )
                                                     } else {
@@ -201,6 +204,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         let manually_inhibited = mgr.state.manually_paused;
                                                         let paused = mgr.state.paused;
                                                         let media_blocking = mgr.state.media_blocking;
+                                                        let media_bridge_active = mgr.state.media_bridge_active;
                                                         let cfg_clone = mgr.state.cfg.clone();
                                                         
                                                         drop(mgr);
@@ -249,7 +253,8 @@ pub async fn spawn_ipc_socket_with_listener(
                                                                 Some(idle_inhibited), 
                                                                 Some(manually_inhibited), 
                                                                 Some(app_blocking), 
-                                                                Some(media_blocking)
+                                                                Some(media_blocking),
+                                                                Some(media_bridge_active)
                                                             )
                                                         } else {
                                                             "No configuration loaded".to_string()

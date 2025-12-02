@@ -67,6 +67,12 @@ pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
         return;
     }
 
+    // Mark media bridge as active
+    {
+        let mut mgr = manager.lock().await;
+        mgr.state.media_bridge_active = true;
+    }
+
     tokio::spawn(async move {
         let mut poll_interval = interval(Duration::from_millis(POLL_INTERVAL_MS));
         let mut last_state: Option<BrowserMediaState> = None;

@@ -16,7 +16,6 @@ const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
     "opera",
     "vivaldi",
     "edge",
-    "safari",
     "mpv",
     "vlc",
     "totem",
@@ -75,6 +74,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     mgr.state.browser_media_playing = false;
                     mgr.state.media_playing = false;
                     mgr.state.media_blocking = false;
+                    mgr.state.media_bridge_active = false;
                 }
                 
                 // Re-enable D-Bus MPRIS checking
@@ -296,4 +296,3 @@ fn has_playerctl_players() -> bool {
     let stdout = String::from_utf8_lossy(&output.stdout);
     !stdout.trim().is_empty()
 }
-
