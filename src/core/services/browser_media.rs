@@ -14,6 +14,9 @@ use crate::log::{log_message, log_error_message};
 
 const BRIDGE_SOCKET: &str = "/tmp/media_bridge.sock";
 const POLL_INTERVAL_MS: u64 = 1000;
+
+// Use AtomicBool as a shutdown signal instead of just a "running" flag
+static SHUTDOWN_SIGNAL: AtomicBool = AtomicBool::new(false);
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Query the browser media state from the Python bridge
@@ -53,24 +56,58 @@ struct BrowserMediaState {
     playing_tabs: Vec<i32>,
 }
 
-/// Reset the monitor flag so it can be restarted
-pub async fn reset_browser_monitor() {
+/// Stop the browser monitor and wait for it to clean up
+pub async fn stop_browser_monitor(manager: Arc<Mutex<Manager>>) {
+    log_message("Stopping browser media monitor...");
+    
+    // Signal shutdown
+    SHUTDOWN_SIGNAL.store(true, Ordering::SeqCst);
+    
+    // Wait a bit for the task to notice and exit
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    
+    // Clear all browser inhibitors
+    {
+        let mut mgr = manager.lock().await;
+        let prev_tab_count = mgr.state.browser_playing_tab_count;
+        if prev_tab_count > 0 {
+            log_message(&format!(
+                "Clearing {} browser tab inhibitors",
+                prev_tab_count
+            ));
+            for _ in 0..prev_tab_count {
+                decr_active_inhibitor(&mut mgr).await;
+            }
+        }
+        
+        // Reset browser state
+        mgr.state.browser_playing_tab_count = 0;
+        mgr.state.browser_media_playing = false;
+        mgr.state.media_bridge_active = false;
+    }
+    
+    // Reset flags for next spawn
     MONITOR_RUNNING.store(false, Ordering::SeqCst);
-    log_message("Browser media monitor reset");
+    SHUTDOWN_SIGNAL.store(false, Ordering::SeqCst);
+    
+    log_message("Browser media monitor stopped");
 }
 
 /// Spawn a background task that polls the browser media bridge
 pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
     // Prevent multiple monitors from running
     if MONITOR_RUNNING.swap(true, Ordering::SeqCst) {
-        log_message("Browser media monitor already running");
+        log_message("Browser media monitor already running, skipping spawn");
         return;
     }
 
-    // Mark media bridge as active
+    // Mark media bridge as active and initialize tracking
     {
         let mut mgr = manager.lock().await;
         mgr.state.media_bridge_active = true;
+        // Initialize browser tab count to 0 when starting
+        mgr.state.browser_playing_tab_count = 0;
+        mgr.state.browser_media_playing = false;
     }
 
     tokio::spawn(async move {
@@ -81,6 +118,12 @@ pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
         log_message("Browser media monitor started");
         
         loop {
+            // Check for shutdown signal
+            if SHUTDOWN_SIGNAL.load(Ordering::SeqCst) {
+                log_message("Browser media monitor received shutdown signal, exiting");
+                break;
+            }
+            
             poll_interval.tick().await;
             
             match query_browser_status() {
@@ -91,7 +134,7 @@ pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                     }
                     
                     // Check if state changed 
-                   let state_changed = last_state.as_ref().map(|last| {
+                    let state_changed = last_state.as_ref().map(|last| {
                         last.playing != state.playing ||
                         last.tab_count != state.tab_count ||
                         last.playing_tabs != state.playing_tabs
@@ -137,6 +180,8 @@ pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                 }
             }
         }
+        
+        log_message("Browser media monitor task exited");
     });
 }
 
@@ -151,21 +196,30 @@ async fn handle_browser_media_state(
     let prev_tab_count = mgr.state.browser_playing_tab_count;
     let new_tab_count = state.playing_tabs.len();
 
+    // Calculate the delta
+    let delta = new_tab_count as i32 - prev_tab_count as i32;
+
+    if delta != 0 {
+        log_message(&format!(
+            "Browser tab count change: {} → {} (delta: {})",
+            prev_tab_count, new_tab_count, delta
+        ));
+    }
+
+    // Update the tab count
     mgr.state.browser_playing_tab_count = new_tab_count;
 
-    // If new tabs started playing, increment inhibitor per new tab
-    if new_tab_count > prev_tab_count {
-        let diff = new_tab_count - prev_tab_count;
-        for _ in 0..diff {
+    // Apply inhibitor changes based on delta
+    if delta > 0 {
+        // Tabs started playing
+        for _ in 0..delta {
             incr_active_inhibitor(&mut mgr).await;
         }
         mgr.state.media_playing = true;
         mgr.state.media_blocking = true;
-    }
-    // If tabs stopped playing, decrement inhibitor per stopped tab
-    else if new_tab_count < prev_tab_count {
-        let diff = prev_tab_count - new_tab_count;
-        for _ in 0..diff {
+    } else if delta < 0 {
+        // Tabs stopped playing
+        for _ in 0..delta.abs() {
             decr_active_inhibitor(&mut mgr).await;
         }
         if new_tab_count == 0 {

@@ -315,6 +315,41 @@ impl ManagerState {
             self.current_block
         ));
     }
+
+    /// Get the effective media playing state accounting for both MPRIS and browser
+    pub fn is_any_media_playing(&self) -> bool {
+        if self.media_bridge_active {
+            // When bridge is active, check browser state OR MPRIS (for non-browser players)
+            self.browser_media_playing || self.media_playing
+        } else {
+            // When bridge is not active, just check MPRIS
+            self.media_playing
+        }
+    }
+
+    /// Get the total number of media inhibitors currently active
+    /// This helps with debugging and transition verification
+    pub fn get_media_inhibitor_count(&self) -> usize {
+        if self.media_bridge_active {
+            // Browser extension tracks per-tab
+            self.browser_playing_tab_count
+        } else {
+            // MPRIS is binary (0 or 1)
+            if self.media_playing { 1 } else { 0 }
+        }
+    }
+
+    /// Log current media state for debugging
+    pub fn log_media_state(&self) {
+        crate::log::log_message(&format!(
+            "Media State: bridge_active={}, browser_playing={} (tabs={}), mpris_playing={}, total_inhibitors={}",
+            self.media_bridge_active,
+            self.browser_media_playing,
+            self.browser_playing_tab_count,
+            self.media_playing,
+            self.active_inhibitor_count
+        ));
+    }
 }
 
 #[derive(Debug)]

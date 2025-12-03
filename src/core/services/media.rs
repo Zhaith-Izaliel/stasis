@@ -43,12 +43,16 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             let is_detected = firefox_extension_exists();
             
             if is_detected && !was_detected {
-                crate::log::log_message("Firefox MPRIS bridge now detected, spawning browser media monitor");
+                crate::log::log_message("Firefox MPRIS bridge now detected, transitioning to browser media monitor");
                 
-                // Reset media state - clear any MPRIS-based media tracking
+                // HANDOFF: MPRIS → Browser Extension
                 {
                     let mut mgr = manager_clone.lock().await;
-                    if mgr.state.media_playing {
+                    
+                    // Clear MPRIS-based media state
+                    // If MPRIS was tracking media as playing, decrement the inhibitor
+                    if mgr.state.media_playing && !mgr.state.browser_media_playing {
+                        crate::log::log_message("Clearing MPRIS media inhibitor before browser monitor takeover");
                         decr_active_inhibitor(&mut mgr).await;
                         mgr.state.media_playing = false;
                         mgr.state.media_blocking = false;
@@ -59,26 +63,32 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 crate::core::services::browser_media::spawn_browser_media_monitor(Arc::clone(&manager_clone)).await;
                 was_detected = true;
             } else if !is_detected && was_detected {
-                crate::log::log_message("Firefox MPRIS bridge lost");
+                crate::log::log_message("Firefox MPRIS bridge lost, transitioning to standard MPRIS detection");
                 
-                // Reset browser media state
-                crate::core::services::browser_media::reset_browser_monitor().await;
-                {
+                // HANDOFF: Browser Extension → MPRIS
+                // Stop the browser monitor properly (this clears inhibitors)
+                crate::core::services::browser_media::stop_browser_monitor(Arc::clone(&manager_clone)).await;
+                
+                // Re-check MPRIS immediately to see if anything is actually playing
+                let (ignore_remote_media, media_blacklist) = {
+                    let mgr = manager_clone.lock().await;
+                    let ignore = mgr.state.cfg.as_ref().map(|c| c.ignore_remote_media).unwrap_or(false);
+                    let blacklist = mgr.state.cfg.as_ref().map(|c| c.media_blacklist.clone()).unwrap_or_default();
+                    (ignore, blacklist)
+                };
+
+                // Check if MPRIS reports anything playing (skip_firefox=false now)
+                let playing = check_media_playing(ignore_remote_media, &media_blacklist, false);
+                if playing {
+                    crate::log::log_message("MPRIS reports media playing after browser monitor stopped");
                     let mut mgr = manager_clone.lock().await;
-                    // Clear browser-specific state
-                    let prev_tab_count = mgr.state.browser_playing_tab_count;
-                    for _ in 0..prev_tab_count {
-                        decr_active_inhibitor(&mut mgr).await;
+                    if !mgr.state.media_playing {
+                        incr_active_inhibitor(&mut mgr).await;
+                        mgr.state.media_playing = true;
+                        mgr.state.media_blocking = true;
                     }
-                    mgr.state.browser_playing_tab_count = 0;
-                    mgr.state.browser_media_playing = false;
-                    mgr.state.media_playing = false;
-                    mgr.state.media_blocking = false;
-                    mgr.state.media_bridge_active = false;
                 }
                 
-                // Re-enable D-Bus MPRIS checking
-                crate::log::log_message("Re-enabling standard MPRIS detection");
                 was_detected = false;
             }
         }
@@ -107,49 +117,75 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
 
         // Initial check
         {
-            let (ignore_remote_media, media_blacklist) = {
+            let (ignore_remote_media, media_blacklist, bridge_active) = {
                 let mgr = manager.lock().await;
                 let ignore = mgr.state.cfg.as_ref().map(|c| c.ignore_remote_media).unwrap_or(false);
                 let blacklist = mgr.state.cfg.as_ref().map(|c| c.media_blacklist.clone()).unwrap_or_default();
-                (ignore, blacklist)
+                (ignore, blacklist, mgr.state.media_bridge_active)
             };
 
-            let playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_firefox);
-            if playing {
-                let mut mgr = manager.lock().await;
-                if !mgr.state.media_playing {
-                    incr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media_playing = true;
-                    mgr.state.media_blocking = true;
-                }
-            }
-        }
-
-        loop {
-            if let Some(_msg) = stream.next().await {
-                let (ignore_remote_media, media_blacklist, browser_playing) = {
-                    let mgr = manager.lock().await;
-                    let ignore = mgr.state.cfg.as_ref().map(|c| c.ignore_remote_media).unwrap_or(false);
-                    let blacklist = mgr.state.cfg.as_ref().map(|c| c.media_blacklist.clone()).unwrap_or_default();
-                    (ignore, blacklist, mgr.state.browser_media_playing)
-                };
-
-                // If browser extension says it's playing, trust it completely
-                if browser_playing {
+            // Only check MPRIS if browser bridge is not active
+            if !bridge_active {
+                let playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_firefox);
+                if playing {
                     let mut mgr = manager.lock().await;
                     if !mgr.state.media_playing {
                         incr_active_inhibitor(&mut mgr).await;
                         mgr.state.media_playing = true;
                         mgr.state.media_blocking = true;
                     }
+                }
+            }
+        }
+
+        loop {
+            if let Some(_msg) = stream.next().await {
+                let (ignore_remote_media, media_blacklist, browser_playing, bridge_active) = {
+                    let mgr = manager.lock().await;
+                    let ignore = mgr.state.cfg.as_ref().map(|c| c.ignore_remote_media).unwrap_or(false);
+                    let blacklist = mgr.state.cfg.as_ref().map(|c| c.media_blacklist.clone()).unwrap_or_default();
+                    (ignore, blacklist, mgr.state.browser_media_playing, mgr.state.media_bridge_active)
+                };
+
+                // If browser extension is active, it manages all browser media
+                // MPRIS should only check non-browser players in this mode
+                if bridge_active {
+                    // Check for non-browser media
+                    let skip_ff = true;
+                    let any_non_browser_playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_ff);
+                    
+                    let mut mgr = manager.lock().await;
+                    
+                    // The browser extension handles browser media (already counted in inhibitors)
+                    // We just need to handle non-browser media with a separate inhibitor
+                    // 
+                    // State should be:
+                    // - media_playing reflects if ANY media is playing (browser OR non-browser)
+                    // - But we don't double-count inhibitors
+                    
+                    // Update media_playing to reflect combined state
+                    let should_be_playing = browser_playing || any_non_browser_playing;
+                    
+                    // But only change inhibitor count for non-browser media changes
+                    // The browser extension already manages its own inhibitors
+                    if any_non_browser_playing && !mgr.state.media_playing {
+                        // Non-browser media started (browser might also be playing, but that's separate)
+                        incr_active_inhibitor(&mut mgr).await;
+                    } else if !any_non_browser_playing && mgr.state.media_playing && !browser_playing {
+                        // Non-browser media stopped AND browser isn't playing
+                        decr_active_inhibitor(&mut mgr).await;
+                    }
+                    
+                    mgr.state.media_playing = should_be_playing;
+                    mgr.state.media_blocking = should_be_playing;
+                    
                     continue;
                 }
 
-                // Check if extension exists - if it does, skip MPRIS for Firefox
+                // Browser extension not active - use standard MPRIS for everything
                 let skip_ff = firefox_extension_exists();
-
-                // Otherwise check MPRIS for non-browser media
                 let any_playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_ff);
+                
                 let mut mgr = manager.lock().await;
                 if any_playing && !mgr.state.media_playing {
                     incr_active_inhibitor(&mut mgr).await;
