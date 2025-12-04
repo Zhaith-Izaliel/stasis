@@ -1,0 +1,9 @@
+[X] pemove all Discord links + delete Discord page
+[X] figure out making notify-send non-blocking (do not break lock centricity)
+[] cleanup logging
+[] move brightness logic to brightness.rs and inhibitor code to inhibitor.rs
+[] instant actions triggering on each reset (mod.rs reset function)
+[] Add notifications to website
+[] Move getters + setters in heplers.rs -> state.rs + removed compositor managed
+[] move media state and logic to media_bridge.rs
+[] ManagerState -> ManagerState + Action Queue

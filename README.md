@@ -31,7 +31,7 @@
 
 ---
 
-## ✨ Features
+## Features
 
 Stasis doesn't just lock your screen after a timer—it understands context. Watching a video? Reading a document? Playing music? Stasis detects these scenarios and intelligently manages idle behavior, so you never have to jiggle your mouse to prevent an unwanted screen lock.
 
@@ -46,9 +46,7 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - **📝 Clean configuration** – uses the intuitive [RUNE](https://github.com/saltnpepper97/rune-cfg) configuration language
 - **⚡ Live reload** – update configuration without restarting the daemon
 
-## 🗺️ Roadmap
-
-> Stasis is evolving! Here's what's currently in progress, planned, and potential future features. Items are grouped to show what's happening now and what's coming next.
+## Roadmap
 
 ### Complete
 
@@ -57,19 +55,17 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - [x] **Resume-command support** – Each action block can run an optional follow-up command after completion.  
 - [x] **Event-driven, minimal polling** – Stasis now relies primarily on two internal loops that notify others to wake from deep sleep, significantly reducing CPU and memory usage at idle.  
 - [x] **CLI per-state triggers** – Trigger a **specific state**, the **current state**, or **all states**, all while respecting previously completed actions.  
-- [x] Custom notifications - Run notifications before any command block as well as notify on unpause!  requires `libnotify`
+- [x] **Custom notifications** - Run notifications before any command block as well as notify on unpause!  requires `libnotify`
 
 ### In Progress
-
-- [ ] **User profiles / presets** – save and load different workflows for various scenarios (work, gaming, etc.).
-
+- [ ] **Refactoring** small portion of code base
 ### Planned
-
+- [ ] **User profiles / presets** – save and load different workflows for various scenarios (work, gaming, etc.).
 - [ ] **Logging & analytics** – historical idle data for power/performance insights.
 - [ ] **Power-saving optimizations** – CPU/GPU-aware idle handling.
 
 
-## 📦 Installation
+## Installation
 
 ### Arch Linux (AUR)
 
@@ -132,21 +128,21 @@ in {
 ```
 
 Notes:
-- please know this i am a complete noob in nix and flakes, so updates and fixes will be appreciated! --CamRed25
+- please know this i am a complete noob in nix and flakes, so updates and fixes will be appreciated! @CamRed25
 
 ### From Source
 
 #### Dependencies
 
-```sh
-git
-cargo
-rust
-dbus
-libnotify (optional) - for desktop notifications
-playerctl (optional) - for enhanced media player detection
-pulseaudio/pipewire-pulse (optional) - audio sink detection for media handling
-```
+<p>
+<code>git</code> <br />
+<code>cargo</code> <br />
+<code>rust</code> <br />
+<code>dbus</code> <br />
+<code>libnotify</code> - <b>(optional)</b> for desktop notifications <br />
+<code>playerctl</code> - <b>(optional)</b> for enhanced media player detection <br />
+<code>pulseaudio</code> or <code>pipewire-pulse</code> - <b>(optional)</b> for audio detection <br />
+<p>
 
 Build and install manually for maximum control:
 
@@ -163,7 +159,7 @@ sudo install -Dm755 target/release/stasis /usr/local/bin/stasis
 install -Dm755 target/release/stasis ~/.local/bin/stasis
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 Get up and running in just a few minutes!  
 See the [webpage](https://saltnpepper97.github.io/stasis/) for quick start instructions, including how to ensure your user is in the `input` group and much more!
@@ -180,7 +176,7 @@ Stasis integrates with each compositor's native IPC protocol for optimal app det
 | **River** | ⚠️ Limited | Process-based fallback (details below) |
 | **Your Favorite** | 🤝 PRs Welcome | Help us expand support! |
 
-### 📌 River & labwc Compatibility Notes
+### River & labwc Compatibility Notes
 
 Both River and labwc have IPC protocol limitations that affect Stasis functionality:
 
@@ -200,7 +196,7 @@ We welcome contributions! Adding support typically involves:
 
 Check existing implementations in the codebase for reference, and don't hesitate to open an issue if you need guidance.
 
-## 🌐 Media Bridge Browser Plugin
+## Media Bridge Browser Plugin
 
 **[Media Bridge](https://github.com/saltnpepper97/soundtabs)** is an optional browser extension that provides accurate per-tab media detection. While SoundTabs is a standalone project not exclusive to Stasis, it solves critical browser media detection issues that benefit idle management.
 
@@ -217,11 +213,11 @@ Media Bridge fixes these issues by providing real-time, per-tab audio state dire
 
 ### Why Use Media Bridge with Stasis?
 
-- **🎯 Per-tab accuracy** – Know exactly which tab is playing media
-- **🔇 Muted tab detection** – Correctly detect when tabs are muted vs. paused
-- **⚡ Real-time updates** – Instant state changes without audio sink polling
-- **🔄 Seamless fallback** – Stasis automatically uses standard MPRIS if Media Bridge isn't installed
-- **🪟 Works alongside other players** – Doesn't interfere with Spotify, VLC, or other media apps
+- **Per-tab accuracy** – Know exactly which tab is playing media
+- **Muted tab detection** – Correctly detect when tabs are muted vs. paused
+- **Real-time updates** – Instant state changes without audio sink polling
+- **Seamless fallback** – Stasis automatically uses standard MPRIS if Media Bridge isn't installed
+- **Works alongside other players** – Doesn't interfere with Spotify, VLC, or other media apps
 
 ### Browser Support
 
@@ -240,35 +236,41 @@ Media Bridge fixes these issues by providing real-time, per-tab audio state dire
 
 > **📝 Note:** Media Bridge is completely optional and not Stasis-specific. Stasis works great without it using improved MPRIS detection with audio sink verification.
 
-## 🔧 About RUNE Configuration
+## About RUNE Configuration
 
 Stasis uses **[RUNE](https://github.com/saltnpepper97/rune-cfg)**—a purpose-built configuration language that's both powerful and approachable.
 
 **Why RUNE?**
-- 📖 **Human-readable:** Clean syntax that makes sense at a glance
-- 🔢 **Variables:** Define once, reference anywhere
-- 🎯 **Type-safe:** Catch configuration errors before runtime
-- 📦 **Nested blocks:** Organize complex configurations naturally
-- 🔤 **Raw strings:** Use `r"regex.*"` for patterns without escaping hell
-- 💬 **Comments:** Document your config with `#`
-- 🏷️ **Metadata:** Add context with `@` annotations
+- **Human-readable:** Clean syntax that makes sense at a glance
+- **Variables:** Define once, reference anywhere
+- **Type-safe:** Catch configuration errors before runtime
+- **Nested blocks:** Organize complex configurations naturally
+- **Raw strings:** Use `r"regex.*"` for patterns without escaping hell
+- **Comments:** Document your config with `#`
+- **Metadata:** Add context with `@` annotations
 
 RUNE makes configuration feel less like programming and more like describing what you want—because that's what a config should be.
 
-## 🤝 Contributing
+## Contributing
 
-Contributions make Stasis better for everyone! Here's how you can help:
+Thank you for making Stasis better for everyone! To keep contributions organized and efficient, please follow these guidelines.
 
-### Ways to Contribute
+### Contribution Flow
 
-- 🐛 **Report bugs** – Open an issue with reproduction steps
-- 💡 **Suggest features** – Share your use cases and ideas
-- 🔧 **Submit PRs** – Fix bugs, add features, or improve code
-- 📦 **Package for distros** – Make Stasis available to more users
-- 📖 **Improve docs** – Better explanations, examples, and guides
-- 🖥️ **Add compositor support** – Expand Wayland ecosystem compatibility
+1. **Bug Reports & Feature Requests**  
+   - Before opening an issue, check the [FAQ](https://saltnpepper97.github.io/stasis/faq).  
+   - Any **new feature or enhancement** must first go through a bug report or issue to discuss use cases and design.  
+   - Use the appropriate label: `bug` for errors, `feature request` for new ideas, `enhancement` for improvements.  
 
-## 📄 License
+2. **Packaging & Compositor Contributions**  
+   - Direct contributions for **distribution packaging** or **Wayland/compositor integration** are welcome without prior issue discussion.  
+   - Use the labels: `packaging` or `compositor`.
+
+3. **Other Contributions**  
+   - Anything else not listed above **must start as an issue** so maintainers can review and provide feedback.  
+   - Labels like `discussion`, `help wanted`, or `needs review` can help guide attention.
+
+## License
 
 Released under the [MIT License](LICENSE) – free to use, modify, and distribute.
 
