@@ -168,23 +168,6 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
         action.name, action.kind, action.timeout, action.command
     ));
 
-    // Handle notification before action
-    if let Some(cfg) = &mgr.state.cfg {
-        if cfg.notify_before_action {
-            if let Some(ref notification_msg) = action.notification {
-                let notify_cmd = format!(
-                    "notify-send -a Stasis '{}' && sleep {}",
-                    notification_msg,
-                    cfg.notify_seconds_before
-                );
-                log_message(&format!("Running pre-action notification: {}", notification_msg));
-                if let Err(e) = run_command_silent(&notify_cmd).await {
-                    log_message(&format!("Failed to send notification: {}", e));
-                }
-            }
-        }
-    }
-
     // For lock actions using loginctl, run the command but don't manage state
     // The LoginctlLock event will handle setting up the lock state
     if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
