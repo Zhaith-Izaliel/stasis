@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod brightness;
 pub mod helpers;
 pub mod idle_loops;
 pub mod state;
@@ -15,7 +16,8 @@ use crate::{
     config::model::{IdleAction, StasisConfig}, 
     core::manager::{
         actions::{is_process_running, run_command_detached},
-        helpers::{restore_brightness, run_action},
+        brightness::restore_brightness,
+        helpers::run_action,
     }, 
     log::{log_message, log_message_debug}
 };
