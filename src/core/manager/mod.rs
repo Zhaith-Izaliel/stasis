@@ -83,6 +83,12 @@ impl Manager {
         self.state.debounce = Some(now + debounce);
         self.state.last_activity = now;
 
+        // Reset notification state ONLY if not locked
+        // When locked, we're just resetting for post-lock actions
+        if !self.state.lock_state.is_locked {
+            self.state.notification_sent = false;
+        }
+
         // Store values we need before borrowing
         let is_locked = self.state.lock_state.is_locked;
         let cmd_to_check = self.state.lock_state.command.clone();
@@ -173,12 +179,22 @@ impl Manager {
         }
 
         let now = Instant::now();
+        
+        //log_debug_message(&format!("check_timeouts called at t={:?}", now.duration_since(self.state.start_time).as_secs()));
 
         // Store values we need before borrowing actions
         let action_index = self.state.action_index;
         let is_locked = self.state.lock_state.is_locked;
         let last_activity = self.state.last_activity;
         let debounce = self.state.debounce;
+        let notification_sent = self.state.notification_sent;
+        
+        // Extract config values before borrowing
+        let (notify_enabled, notify_seconds) = if let Some(ref cfg) = self.state.cfg {
+            (cfg.notify_before_action, cfg.notify_seconds_before)
+        } else {
+            (false, 0)
+        };
 
         // Get reference to the right actions Vec using helper method
         let actions = self.state.get_active_actions_mut();
@@ -194,9 +210,9 @@ impl Manager {
             return;
         }
 
-        // Calculate earliest allowed fire time
+        // Calculate the base timeout (when notification fires OR when action fires if no notification)
         let timeout = Duration::from_secs(actions[index].timeout as u64);
-        let next_fire = if let Some(last_trig) = actions[index].last_triggered {
+        let base_timeout_instant = if let Some(last_trig) = actions[index].last_triggered {
             // Already triggered: timeout from when it last fired
             last_trig + timeout
         } else if index > 0 {
@@ -213,18 +229,71 @@ impl Manager {
             base + timeout
         };
 
-        if now < next_fire {
+        // Check if this action has a notification configured
+        let has_notification = actions[index].notification.is_some();
+
+        // Calculate when the action should actually fire
+        // If notification configured: action fires at base_timeout + notify_seconds
+        // If no notification: action fires at base_timeout
+        let notify_duration = Duration::from_secs(notify_seconds);
+        let actual_action_fire_instant = if notify_enabled && has_notification {
+            base_timeout_instant + notify_duration
+        } else {
+            base_timeout_instant
+        };
+
+        // Handle notification phase
+        if notify_enabled && has_notification && !notification_sent {
+            // Time to send notification is at base_timeout_instant
+            if now >= base_timeout_instant {
+                log_message("Notification block: time to send notification!");
+                // Send notification NOW
+                if let Some(ref notification_msg) = actions[index].notification {
+                    let notify_cmd = format!("notify-send -a Stasis '{}'", notification_msg);
+                    log_message(&format!("Sending pre-action notification: {}", notification_msg));
+                    
+                    if let Err(e) = run_command_detached(&notify_cmd).await {
+                        log_message(&format!("Failed to send notification: {}", e));
+                    }
+                    
+                    self.state.notification_sent = true;
+                    log_message("Notification sent, returning to wait for action time");
+                    self.state.notify.notify_one();
+                }
+                
+                log_message("About to return from notification block");
+                // Always return after sending notification - we need to wait for actual_action_fire_instant
+                return;
+            } else {
+                // Not time for notification yet
+                return;
+            }
+        }
+
+        // Check if it's time to fire the action
+        if now < actual_action_fire_instant {
             // Not ready yet
+            log_message(&format!("Action not ready yet, waiting {} more seconds", 
+                (actual_action_fire_instant - now).as_secs()));
             return;
         }
 
-        // Action is ready: clone and mark triggered
+        let start_time = self.state.start_time; // copy Instant before mutable borrow
+
         let (action_clone, actions_len) = {
             let actions = self.state.get_active_actions_mut();
             let action_clone = actions[index].clone();
             actions[index].last_triggered = Some(now);
+            log_message(&format!(
+                "Marked action {} as triggered at t={:?}", 
+                action_clone.name,
+                now.duration_since(start_time).as_secs() // use copied value
+            ));
             (action_clone, actions.len())
-        }; // Borrow ends here
+        };
+
+        // Reset notification flag after firing action
+        self.state.notification_sent = false;
 
         // Advance index
         self.state.action_index += 1;
@@ -275,6 +344,13 @@ impl Manager {
             return None;
         }
 
+        // Get config for notification settings
+        let (notify_enabled, notify_seconds) = if let Some(ref cfg) = self.state.cfg {
+            (cfg.notify_before_action, cfg.notify_seconds_before)
+        } else {
+            (false, 0)
+        };
+
         let mut min_time: Option<Instant> = None;
 
         for (i, action) in actions.iter().enumerate() {
@@ -285,7 +361,7 @@ impl Manager {
 
             // Calculate next fire time for this action
             let timeout = Duration::from_secs(action.timeout as u64);
-            let next_time = if let Some(last_trig) = action.last_triggered {
+            let base_timeout_instant = if let Some(last_trig) = action.last_triggered {
                 // Already triggered: timeout from when it last fired
                 last_trig + timeout
             } else if i > 0 {
@@ -302,9 +378,32 @@ impl Manager {
                 base + timeout
             };
 
+            // Determine the next wake time
+            let next_wake_time = if notify_enabled && action.notification.is_some() {
+                if !self.state.notification_sent {
+                    // Wake up at notification time (base_timeout_instant)
+                    base_timeout_instant
+                } else {
+                    // Notification already sent, wake up at actual action time
+                    let notify_duration = Duration::from_secs(notify_seconds);
+                    base_timeout_instant + notify_duration
+                }
+            } else {
+                // No notification, wake up at base_timeout_instant
+                base_timeout_instant
+            };
+
+            //log_debug_message(&format!(
+            //    "next_action_instant: action={}, base_timeout={:?}s, notification_sent={}, next_wake={:?}s",
+            //    action.name,
+            //    base_timeout_instant.duration_since(self.state.start_time).as_secs(),
+            //    self.state.notification_sent,
+            //    next_wake_time.duration_since(self.state.start_time).as_secs()
+            //));
+
             min_time = Some(match min_time {
-                None => next_time,
-                Some(current_min) => current_min.min(next_time),
+                None => next_wake_time,
+                Some(current_min) => current_min.min(next_wake_time),
             });
         }
 
