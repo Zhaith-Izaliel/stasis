@@ -52,12 +52,12 @@ pub async fn spawn_ipc_socket_with_listener(
                                                     mgr.recheck_media().await;
                                                     mgr.trigger_instant_actions().await;
                                                     
-                                                    let idle_time = mgr.state.last_activity.elapsed();
-                                                    let uptime = mgr.state.start_time.elapsed();
-                                                    let manually_inhibited = mgr.state.manually_paused;
-                                                    let paused = mgr.state.paused;
-                                                    let media_blocking = mgr.state.media_blocking;
-                                                    let media_bridge_active = mgr.state.media_bridge_active;
+                                                    let idle_time = mgr.state.timing.last_activity.elapsed();
+                                                    let uptime = mgr.state.timing.start_time.elapsed();
+                                                    let manually_inhibited = mgr.state.inhibitors.manually_paused;
+                                                    let paused = mgr.state.inhibitors.paused;
+                                                    let media_blocking = mgr.state.media.media_blocking;
+                                                    let media_bridge_active = mgr.state.media.media_bridge_active;
                                                     let cfg_clone = mgr.state.cfg.clone();
                                                     
                                                     drop(mgr);
@@ -199,12 +199,12 @@ pub async fn spawn_ipc_socket_with_listener(
                                             loop {
                                                 match manager.try_lock() {
                                                     Ok(mgr) => {
-                                                        let idle_time = mgr.state.last_activity.elapsed();
-                                                        let uptime = mgr.state.start_time.elapsed();
-                                                        let manually_inhibited = mgr.state.manually_paused;
-                                                        let paused = mgr.state.paused;
-                                                        let media_blocking = mgr.state.media_blocking;
-                                                        let media_bridge_active = mgr.state.media_bridge_active;
+                                                        let idle_time = mgr.state.timing.last_activity.elapsed();
+                                                        let uptime = mgr.state.timing.start_time.elapsed();
+                                                        let manually_inhibited = mgr.state.inhibitors.manually_paused;
+                                                        let paused = mgr.state.inhibitors.paused;
+                                                        let media_blocking = mgr.state.media.media_blocking;
+                                                        let media_bridge_active = mgr.state.media.media_bridge_active;
                                                         let cfg_clone = mgr.state.cfg.clone();
                                                         
                                                         drop(mgr);

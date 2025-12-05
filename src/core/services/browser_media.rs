@@ -34,7 +34,7 @@ pub async fn stop_browser_monitor(manager: Arc<Mutex<Manager>>) {
     // Clean up all browser-related inhibitors and state
     {
         let mut mgr = manager.lock().await;
-        let prev_tab_count = mgr.state.browser_playing_tab_count;
+        let prev_tab_count = mgr.state.media.browser_playing_tab_count;
         
         if prev_tab_count > 0 {
             log_message(&format!(
@@ -49,9 +49,9 @@ pub async fn stop_browser_monitor(manager: Arc<Mutex<Manager>>) {
         }
         
         // Reset all browser-related state
-        mgr.state.browser_playing_tab_count = 0;
-        mgr.state.browser_media_playing = false;
-        mgr.state.media_bridge_active = false;
+        mgr.state.media.browser_playing_tab_count = 0;
+        mgr.state.media.browser_media_playing = false;
+        mgr.state.media.media_bridge_active = false;
     }
     
     // Reset coordination flags for next spawn
@@ -72,9 +72,9 @@ pub async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
     // Initialize manager state for bridge monitoring
     {
         let mut mgr = manager.lock().await;
-        mgr.state.media_bridge_active = true;
-        mgr.state.browser_playing_tab_count = 0;
-        mgr.state.browser_media_playing = false;
+        mgr.state.media.media_bridge_active = true;
+        mgr.state.media.browser_playing_tab_count = 0;
+        mgr.state.media.browser_media_playing = false;
     }
 
     tokio::spawn(async move {
@@ -142,7 +142,7 @@ async fn update_manager_state(
 
     let prev_tab_count = old_state
         .map(|s| s.playing_tab_count())
-        .unwrap_or(mgr.state.browser_playing_tab_count);
+        .unwrap_or(mgr.state.media.browser_playing_tab_count);
     
     let new_tab_count = new_state.playing_tab_count();
     let delta = new_tab_count as i32 - prev_tab_count as i32;
@@ -155,7 +155,7 @@ async fn update_manager_state(
     }
 
     // Update the stored tab count
-    mgr.state.browser_playing_tab_count = new_tab_count;
+    mgr.state.media.browser_playing_tab_count = new_tab_count;
 
     // Adjust inhibitor count based on delta
     if delta > 0 {
@@ -163,8 +163,8 @@ async fn update_manager_state(
         for _ in 0..delta {
             incr_active_inhibitor(&mut mgr).await;
         }
-        mgr.state.media_playing = true;
-        mgr.state.media_blocking = true;
+        mgr.state.media.media_playing = true;
+        mgr.state.media.media_blocking = true;
     } else if delta < 0 {
         // Tabs stopped playing
         for _ in 0..delta.abs() {
@@ -173,13 +173,13 @@ async fn update_manager_state(
         
         // If no tabs playing, clear media flags
         if new_tab_count == 0 {
-            mgr.state.media_playing = false;
-            mgr.state.media_blocking = false;
+            mgr.state.media.media_playing = false;
+            mgr.state.media.media_blocking = false;
         }
     }
 
     // Update the browser media playing flag
-    mgr.state.browser_media_playing = new_tab_count > 0;
+    mgr.state.media.browser_media_playing = new_tab_count > 0;
 }
 
 /// Log state changes for debugging

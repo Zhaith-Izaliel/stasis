@@ -18,10 +18,12 @@ pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io:
         log_message(&format!("Captured brightness via sysfs: {}/{} on device '{}'", 
             sys_brightness.value, sys_brightness.max_brightness, sys_brightness.device));
 
-        // Store the full u32 value - don't truncate!
-        state.previous_brightness = Some(sys_brightness.value);
-        state.max_brightness = Some(sys_brightness.max_brightness);
-        state.brightness_device = Some(sys_brightness.device);
+        // Use the BrightnessManager to store state
+        state.brightness.store(
+            sys_brightness.value,
+            sys_brightness.max_brightness,
+            sys_brightness.device
+        );
         return Ok(());
     }
 
@@ -33,7 +35,7 @@ pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io:
                 .trim()
                 .parse::<u32>()
                 .unwrap_or(0);
-            state.previous_brightness = Some(val);
+            state.brightness.store_simple(val);
             log_message(&format!("Captured brightness via brightnessctl: {}", val));
         }
         Ok(out) => {
@@ -48,16 +50,16 @@ pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io:
 }
 
 pub async fn restore_brightness(state: &mut ManagerState) -> Result<(), std::io::Error> {
-    if let Some(level) = state.previous_brightness {
+    let (brightness, device, _max) = state.brightness.get_restore_info();
+    
+    if let Some(level) = brightness {
         log_message(&format!("Attempting to restore brightness to {}", level));
 
         // Try sysfs restore first if we have device info
-        if let (Some(device), Some(_max)) = (&state.brightness_device, state.max_brightness) {
-            if restore_sysfs_brightness_to_device(device, level).is_ok() {
+        if let Some(device_name) = device {
+            if restore_sysfs_brightness_to_device(&device_name, level).is_ok() {
                 log_message("Brightness restored via sysfs");
-                state.previous_brightness = None;
-                state.max_brightness = None;
-                state.brightness_device = None;
+                state.brightness.clear();
                 return Ok(());
             }
         }
@@ -77,10 +79,7 @@ pub async fn restore_brightness(state: &mut ManagerState) -> Result<(), std::io:
             }
         }
 
-        // Reset stored brightness
-        state.previous_brightness = None;
-        state.max_brightness = None;
-        state.brightness_device = None;
+        state.brightness.clear();
     }
     Ok(())
 }

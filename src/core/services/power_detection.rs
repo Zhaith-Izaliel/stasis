@@ -22,7 +22,7 @@ pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
         mgr.state.set_on_battery(!on_ac);
     }
 
-    let current_block = manager.lock().await.state.current_block.clone();
+    let current_block = manager.lock().await.state.power.current_block.clone();
     log_debug_message(&format!(
         "Initial power detection: {} (active block: {})",
         if on_ac { "AC" } else { "Battery" },

@@ -44,7 +44,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     {
         let mut mgr = manager.lock().await;
         mgr.tasks.spawn_limited(spawn_idle_task(Arc::clone(&manager)));
-        mgr.tasks.spawn_limited(spawn_lock_watcher(Arc::clone(&manager)).await);
+        mgr.tasks.spawn_limited(spawn_lock_watcher(Arc::clone(&manager)));
         mgr.tasks.spawn_limited(spawn_input_task(Arc::clone(&manager)));
     }
 

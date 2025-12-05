@@ -39,7 +39,7 @@ impl Manager {
     }
 
     pub async fn trigger_instant_actions(&mut self) {
-        if self.state.instants_triggered {
+        if self.state.actions.instants_triggered {
             return;
         }
 
@@ -50,11 +50,11 @@ impl Manager {
             run_action(self, &action).await;
         }
 
-        self.state.instants_triggered = true;
+        self.state.actions.instants_triggered = true;
     }
 
     pub fn reset_instant_actions(&mut self) {
-        self.state.instants_triggered = false;
+        self.state.actions.instants_triggered = false;
         log_debug_message("Instant actions reset; they can trigger again");
     }
 
@@ -69,7 +69,7 @@ impl Manager {
         };
 
         // Restore brightness if needed
-        if self.state.previous_brightness.is_some() {
+        if self.state.brightness.previous_brightness.is_some() {
             if let Err(e) = restore_brightness(&mut self.state).await {
                 log_message(&format!("Failed to restore brightness: {}", e));
             }
@@ -77,21 +77,21 @@ impl Manager {
         
         let now = Instant::now();
         let debounce = Duration::from_secs(cfg.debounce_seconds as u64);
-        self.state.debounce = Some(now + debounce);
-        self.state.last_activity = now;
+        self.state.debounce.main_debounce = Some(now + debounce);
+        self.state.timing.last_activity = now;
 
         // Reset notification state ONLY if not locked
         // When locked, we're just resetting for post-lock actions
-        if !self.state.lock_state.is_locked {
+        if !self.state.lock.is_locked {
             self.state.notification_sent = false;
         }
 
         // Store values we need before borrowing
-        let is_locked = self.state.lock_state.is_locked;
-        let cmd_to_check = self.state.lock_state.command.clone();
+        let is_locked = self.state.lock.is_locked;
+        let cmd_to_check = self.state.lock.command.clone();
 
         // Clear only actions that are before or equal to the current stage
-        for actions in [&mut self.state.default_actions, &mut self.state.ac_actions, &mut self.state.battery_actions] {
+        for actions in [&mut self.state.power.default_actions, &mut self.state.power.ac_actions, &mut self.state.power.battery_actions] {
             let mut past_lock = false;
             for a in actions.iter_mut() {
                 if matches!(a.kind, crate::config::model::IdleAction::LockScreen) {
@@ -128,7 +128,7 @@ impl Manager {
 
         // Reset action_index
         if !is_locked {
-            self.state.action_index = 0;
+            self.state.actions.action_index = 0;
         }
 
         if is_instant {
@@ -146,10 +146,10 @@ impl Manager {
 
                 if still_active {
                     // Always advance to one past lock when locked
-                    self.state.action_index = lock_index.saturating_add(1);
+                    self.state.actions.action_index = lock_index.saturating_add(1);
                     
                     let debounce_end = now + debounce;
-                    let new_action_index = self.state.action_index;
+                    let new_action_index = self.state.actions.action_index;
                     let actions = self.state.get_active_actions_mut();
                     if new_action_index < actions.len() {
                         actions[new_action_index].last_triggered = Some(debounce_end); 
@@ -160,7 +160,7 @@ impl Manager {
                         } 
                     }
                     
-                    self.state.lock_state.post_advanced = true;
+                    self.state.lock.post_advanced = true;
                 } 
             } 
         }
@@ -171,7 +171,7 @@ impl Manager {
 
     // Check whether we have been idle enough to elapse one of the timeouts
     pub async fn check_timeouts(&mut self) {
-        if self.state.paused || self.state.manually_paused {
+        if self.state.inhibitors.paused || self.state.inhibitors.manually_paused {
             return;
         }
 
@@ -180,10 +180,10 @@ impl Manager {
         //log_debug_message(&format!("check_timeouts called at t={:?}", now.duration_since(self.state.start_time).as_secs()));
 
         // Store values we need before borrowing actions
-        let action_index = self.state.action_index;
-        let is_locked = self.state.lock_state.is_locked;
-        let last_activity = self.state.last_activity;
-        let debounce = self.state.debounce;
+        let action_index = self.state.actions.action_index;
+        let is_locked = self.state.lock.is_locked;
+        let last_activity = self.state.timing.last_activity;
+        let debounce = self.state.debounce.main_debounce;
         let notification_sent = self.state.notification_sent;
         
         // Extract config values before borrowing
@@ -283,17 +283,17 @@ impl Manager {
         self.state.notification_sent = false;
 
         // Advance index
-        self.state.action_index += 1;
-        if self.state.action_index < actions_len {
+        self.state.actions.action_index += 1;
+        if self.state.actions.action_index < actions_len {
             // Only mark next action triggered after it actually fires
-            self.state.resume_commands_fired = false;
+            self.state.actions.resume_commands_fired = false;
         } else {
-            self.state.action_index = actions_len - 1;
+            self.state.actions.action_index = actions_len - 1;
         }
 
         // Add to resume queue if needed
         if !matches!(action_clone.kind, IdleAction::LockScreen) && action_clone.resume_command.is_some() {
-            self.state.resume_queue.push(action_clone.clone());
+            self.state.actions.resume_queue.push(action_clone.clone());
         }
 
         // Fire the action
@@ -301,13 +301,13 @@ impl Manager {
     }
 
     pub async fn fire_resume_queue(&mut self) {
-        if self.state.resume_queue.is_empty() {
+        if self.state.actions.resume_queue.is_empty() {
             return;
         }
 
-        log_message(&format!("Firing {} queued resume command(s)...", self.state.resume_queue.len()));
+        log_message(&format!("Firing {} queued resume command(s)...", self.state.actions.resume_queue.len()));
 
-        for action in self.state.resume_queue.drain(..) {
+        for action in self.state.actions.resume_queue.drain(..) {
             if let Some(resume_cmd) = &action.resume_command {
                 log_message(&format!("Running resume command for action: {}", action.name));
                 if let Err(e) = run_command_detached(resume_cmd).await {
@@ -316,11 +316,11 @@ impl Manager {
             }
         }
 
-        self.state.resume_queue.clear();
+        self.state.actions.resume_queue.clear();
     }
 
     pub fn next_action_instant(&self) -> Option<Instant> {
-        if self.state.paused || self.state.manually_paused {
+        if self.state.inhibitors.paused || self.state.inhibitors.manually_paused {
             return None;
         }
 
@@ -342,7 +342,7 @@ impl Manager {
 
         for (i, action) in actions.iter().enumerate() {
             // Skip lock if already locked
-            if matches!(action.kind, IdleAction::LockScreen) && self.state.lock_state.is_locked {
+            if matches!(action.kind, IdleAction::LockScreen) && self.state.lock.is_locked {
                 continue;
             }
 
@@ -357,11 +357,11 @@ impl Manager {
                     prev_trig + timeout
                 } else {
                     // Previous hasn't fired yet, shouldn't happen but fallback
-                    self.state.last_activity + timeout
+                    self.state.timing.last_activity + timeout
                 }
             } else {
                 // First action: use debounce + timeout
-                let base = self.state.debounce.unwrap_or(self.state.last_activity);
+                let base = self.state.debounce.main_debounce.unwrap_or(self.state.timing.last_activity);
                 base + timeout
             };
 
@@ -399,38 +399,38 @@ impl Manager {
 
     pub async fn advance_past_lock(&mut self) {
         log_debug_message("Advancing state past lock stage...");
-        self.state.lock_state.post_advanced = true;
-        self.state.lock_state.last_advanced = Some(Instant::now());
+        self.state.lock.post_advanced = true;
+        self.state.lock.last_advanced = Some(Instant::now());
     }
 
     pub async fn pause(&mut self, manual: bool) {
         if manual {
-            self.state.manually_paused = true;
+            self.state.inhibitors.manually_paused = true;
             log_debug_message("Idle timers manually paused");
-        } else if !self.state.manually_paused {
-            self.state.paused = true;
+        } else if !self.state.inhibitors.manually_paused {
+            self.state.inhibitors.paused = true;
             log_message("Idle timers automatically paused");
         }
     }
 
     pub async fn resume(&mut self, manually: bool) {
         if manually {
-            if self.state.manually_paused {
-                self.state.manually_paused = false;
+            if self.state.inhibitors.manually_paused {
+                self.state.inhibitors.manually_paused = false;
                 
-                if self.state.active_inhibitor_count == 0 {
-                    self.state.paused = false;
+                if self.state.inhibitors.active_inhibitor_count == 0 {
+                    self.state.inhibitors.paused = false;
                     log_message("Idle timers manually resumed");
                 } else {
                     log_message(&format!(
                         "Manual pause cleared, but {} inhibitor(s) still active - timers remain paused",
-                        self.state.active_inhibitor_count
+                        self.state.inhibitors.active_inhibitor_count
                     ));
                 }
             }
-        } else if !self.state.manually_paused && self.state.paused {
+        } else if !self.state.inhibitors.manually_paused && self.state.inhibitors.paused {
             // This is called by decr_active_inhibitor when count reaches 0
-            self.state.paused = false;
+            self.state.inhibitors.paused = false;
             log_message("Idle timers automatically resumed");
         }
     }
@@ -454,13 +454,13 @@ impl Manager {
         let playing = crate::core::services::media::check_media_playing(ignore_remote, &media_blacklist, false, );
 
         // Only change state via the helpers so behaviour stays consistent:
-        if playing && !self.state.media_playing {
+        if playing && !self.state.media.media_playing {
             // call the same helper the monitor uses
             incr_active_inhibitor(self).await;
-            self.state.media_playing = true;
-        } else if !playing && self.state.media_playing {
+            self.state.media.media_playing = true;
+        } else if !playing && self.state.media.media_playing {
             decr_active_inhibitor(self).await;
-            self.state.media_playing = false;
+            self.state.media.media_playing = false;
         }
     }
 

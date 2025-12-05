@@ -222,8 +222,8 @@ async fn pause_for_duration(
         let mut mgr = manager.lock().await;
         
         // Only clear the manual pause flag
-        if mgr.state.manually_paused {
-            mgr.state.manually_paused = false;
+        if mgr.state.inhibitors.manually_paused {
+            mgr.state.inhibitors.manually_paused = false;
             
             // Check if we should actually unpause based on inhibitor count
             let should_notify = if let Some(cfg) = &mgr.state.cfg {
@@ -232,8 +232,8 @@ async fn pause_for_duration(
                 false
             };
 
-            if mgr.state.active_inhibitor_count == 0 {
-                mgr.state.paused = false;
+            if mgr.state.inhibitors.active_inhibitor_count == 0 {
+                mgr.state.inhibitors.paused = false;
                 log_message(&format!("Auto-resuming after {}", reason_clone));
            
                 // Send notification - manual pause lifted and fully resumed
@@ -247,12 +247,12 @@ async fn pause_for_duration(
                 log_message(&format!(
                     "Auto-resume timer expired after {} but {} inhibitor(s) still active - timers remain paused",
                     reason_clone,
-                    mgr.state.active_inhibitor_count
+                    mgr.state.inhibitors.active_inhibitor_count
                 ));
                 
                 // Send notification - manual pause lifted but still inhibited
                 if should_notify {
-                    let inhibitor_word = if mgr.state.active_inhibitor_count == 1 {
+                    let inhibitor_word = if mgr.state.inhibitors.active_inhibitor_count == 1 {
                         "inhibitor"
                     } else {
                         "inhibitors"
@@ -261,7 +261,7 @@ async fn pause_for_duration(
                         "Stasis - manual pause expired",
                         &format!(
                             "Manual pause timer expired, but {} {} still active. Timers remain paused.",
-                            mgr.state.active_inhibitor_count,
+                            mgr.state.inhibitors.active_inhibitor_count,
                             inhibitor_word
                         )
                     ).await;
