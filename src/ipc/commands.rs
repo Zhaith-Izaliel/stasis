@@ -105,9 +105,9 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
             }
         } else {
             // For non-loginctl locks, do the full lock setup
-            mgr.state.lock_state.is_locked = true;
-            mgr.state.lock_state.post_advanced = false;
-            mgr.state.lock_state.command = Some(action.command.clone());
+            mgr.state.lock.is_locked = true;
+            mgr.state.lock.post_advanced = false;
+            mgr.state.lock.command = Some(action.command.clone());
             mgr.state.lock_notify.notify_one();
 
             // Run the lock command
@@ -179,11 +179,11 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
                             actions[next_index].last_triggered = Some(debounce_end);
                         }
 
-                        mgr.state.lock_state.post_advanced = true;
+                        mgr.state.lock.post_advanced = true;
                     }
                 }
 
-                mgr.state.action_index = next_index;
+                mgr.state.actions.action_index = next_index;
             }
 
             // Wake idle loop to recalculate timers

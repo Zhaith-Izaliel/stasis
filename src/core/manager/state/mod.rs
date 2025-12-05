@@ -1,3 +1,5 @@
+pub mod actions;
+pub mod lock;
 pub mod media;
 pub mod power;
 
@@ -7,15 +9,17 @@ use tokio::sync::Notify;
 use crate::{
     config::model::{IdleActionBlock, StasisConfig},
     core::manager::{
-        processes::ProcessInfo, state::media::MediaState
+        state::actions::ActionState,
+        state::media::MediaState,
+        state::lock::LockState,
+        state::power::PowerState,
     },
     log::log_debug_message,
 };
-use crate::core::manager::state::power::PowerState;
 
 #[derive(Debug)]
 pub struct ManagerState {
-    pub action_index: usize,
+    pub actions: ActionState,
     pub active_flags: ActiveFlags,
     pub active_inhibitor_count: u32,
     pub app_inhibit_debounce: Option<Instant>,
@@ -24,9 +28,8 @@ pub struct ManagerState {
     pub compositor_managed: bool,
     pub dbus_inhibit_active: bool,
     pub debounce: Option<Instant>,
-    pub instants_triggered: bool,
     pub last_activity: Instant,
-    pub lock_state: LockState,
+    pub lock: LockState,
     pub lock_notify: Arc<Notify>,
     pub manually_paused: bool,
     pub max_brightness: Option<u32>,
@@ -37,8 +40,6 @@ pub struct ManagerState {
     pub power: PowerState,
     pub previous_brightness: Option<u32>,
     pub pre_suspend_command: Option<String>,
-    pub resume_queue: Vec<IdleActionBlock>,
-    pub resume_commands_fired: bool,
     pub shutdown_flag: Arc<Notify>,
     pub start_time: Instant,
     pub suspend_occured: bool,
@@ -49,7 +50,7 @@ impl Default for ManagerState {
         let now = Instant::now();
 
         Self {
-            action_index: 0,
+            actions: ActionState::default(),
             active_flags: ActiveFlags::default(),
             active_inhibitor_count: 0,
             app_inhibit_debounce: None,
@@ -58,21 +59,18 @@ impl Default for ManagerState {
             compositor_managed: false,
             dbus_inhibit_active: false,
             debounce: None,
-            instants_triggered: false,
             last_activity: now,
-            lock_state: LockState::default(),
+            lock: LockState::default(),
+            lock_notify: Arc::new(Notify::new()),
             manually_paused: false,
             max_brightness: None,
             media: MediaState::default(),
             notify: Arc::new(Notify::new()),
-            lock_notify: Arc::new(Notify::new()),
             notification_sent: false,
             paused: false,
             power: PowerState::new_from_config(&[]),
             previous_brightness: None,
             pre_suspend_command: None,
-            resume_queue: Vec::new(),
-            resume_commands_fired: false,
             shutdown_flag: Arc::new(Notify::new()),
             start_time: now,
             suspend_occured: false,
@@ -88,7 +86,7 @@ impl ManagerState {
         let debounce = Some(now + Duration::from_secs(cfg.debounce_seconds as u64));
 
         Self {
-            action_index: 0,
+            actions: ActionState::default(),
             active_flags: ActiveFlags::default(),
             active_inhibitor_count: 0,
             app_inhibit_debounce: None,
@@ -97,21 +95,18 @@ impl ManagerState {
             compositor_managed: false,
             dbus_inhibit_active: false,
             debounce,
-            instants_triggered: false,
             last_activity: now,
-            lock_state: LockState::from_config(&cfg),
+            lock: LockState::from_config(&cfg),
+            lock_notify: Arc::new(Notify::new()),
             manually_paused: false,
             max_brightness: None,
             media: MediaState::default(),
             notify: Arc::new(Notify::new()),
             notification_sent: false,
-            lock_notify: Arc::new(Notify::new()),
             paused: false,
             power,
             previous_brightness: None,
             pre_suspend_command: cfg.pre_suspend_command.clone(),
-            resume_queue: Vec::new(),
-            resume_commands_fired: false,
             shutdown_flag: Arc::new(Notify::new()),
             start_time: now,
             suspend_occured: false,
@@ -132,13 +127,12 @@ impl ManagerState {
 
     pub fn set_on_battery(&mut self, value: bool) {
         if self.power.set_on_battery(value) {
-            self.reset_action_state();
+            self.reset_actions();
         }
     }
 
-    fn reset_action_state(&mut self) {
-        self.action_index = 0;
-        self.instants_triggered = false;
+    fn reset_actions(&mut self) {
+        self.actions.reset();
         self.notify.notify_one();
     }
 
@@ -175,13 +169,13 @@ impl ManagerState {
             a.last_triggered = None;
         }
 
-        self.reset_action_state();
+        self.reset_actions();
 
         // Debounce reset
         self.debounce = Some(Instant::now() + Duration::from_secs(cfg.debounce_seconds as u64));
 
         self.cfg = Some(Arc::new(cfg.clone()));
-        self.lock_state = LockState::from_config(cfg);
+        self.lock = LockState::from_config(cfg);
         self.last_activity = Instant::now();
 
         log_debug_message(&format!(
@@ -199,7 +193,7 @@ impl ManagerState {
     }
 
     pub fn set_locked(&mut self, locked: bool) {
-        self.lock_state.is_locked = locked;
+        self.lock.is_locked = locked;
     }
 
     pub fn compositor_managed(&self) -> bool {
@@ -212,55 +206,6 @@ impl ManagerState {
 
     pub fn is_manually_paused(&self) -> bool {
         self.manually_paused
-    }
-}
-
-//
-// LockState, ActiveFlags unchanged
-//
-
-#[derive(Debug, Clone)]
-pub struct LockState {
-    pub is_locked: bool,
-    pub process_info: Option<ProcessInfo>,
-    pub command: Option<String>,
-    pub last_advanced: Option<std::time::Instant>,
-    pub post_advanced: bool,
-}
-
-impl Default for LockState {
-    fn default() -> Self {
-        Self {
-            is_locked: false,
-            process_info: None,
-            command: None,
-            last_advanced: None,
-            post_advanced: false,
-        }
-    }
-}
-
-impl LockState {
-    pub fn from_config(cfg: &StasisConfig) -> Self {
-        use crate::config::model::IdleAction;
-
-        let lock_action = cfg.actions.iter().find(|a| a.kind == IdleAction::LockScreen);
-
-        let command = lock_action.map(|a| {
-            if let Some(ref lock_cmd) = a.lock_command {
-                lock_cmd.clone()
-            } else {
-                a.command.clone()
-            }
-        });
-
-        Self {
-            is_locked: false,
-            process_info: None,
-            command,
-            last_advanced: None,
-            post_advanced: false,
-        }
     }
 }
 

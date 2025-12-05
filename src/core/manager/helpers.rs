@@ -9,9 +9,9 @@ use crate::{
 };
 
 pub async fn lock_still_active(state: &crate::core::manager::state::ManagerState) -> bool {
-    if let Some(ref info) = state.lock_state.process_info {
+    if let Some(ref info) = state.lock.process_info {
         is_process_active(info).await
-    } else if let Some(cmd) = &state.lock_state.command {
+    } else if let Some(cmd) = &state.lock.command {
         // Fallback to old method if no ProcessInfo
         is_process_running(cmd).await
     } else {
@@ -49,7 +49,7 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
 
     for action in actions_to_trigger {
         // Skip lockscreen if already locked
-        if matches!(action.kind, IdleAction::LockScreen) && mgr.state.lock_state.is_locked {
+        if matches!(action.kind, IdleAction::LockScreen) && mgr.state.lock.is_locked {
             log_message("Skipping lock action: already locked");
             continue;
         }
@@ -71,7 +71,7 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
         a.last_triggered = Some(now);
     }
 
-    mgr.state.action_index = actions_mut.len().saturating_sub(1);
+    mgr.state.actions.action_index = actions_mut.len().saturating_sub(1);
     log_message("All idle actions triggered manually");
 }
 

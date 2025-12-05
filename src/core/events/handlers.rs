@@ -28,7 +28,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
         Event::ACConnected => {
             let mut mgr = manager.lock().await;
             mgr.state.set_on_battery(false);
-            mgr.state.action_index = 0;
+            mgr.state.actions.action_index = 0;
             
             mgr.reset_instant_actions();
             mgr.trigger_instant_actions().await;
@@ -38,7 +38,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
         Event::ACDisconnected => {
             let mut mgr = manager.lock().await;
             mgr.state.set_on_battery(true);
-            mgr.state.action_index = 0;
+            mgr.state.actions.action_index = 0;
 
             mgr.reset_instant_actions();
             mgr.trigger_instant_actions().await;
@@ -152,7 +152,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             log_debug_message("loginctl lock-session received — handling lock...");
 
             // Skip if already locked
-            if mgr.state.lock_state.is_locked {
+            if mgr.state.lock.is_locked {
                 log_message("Already locked, ignoring loginctl lock-session event");
                 return;
             }
@@ -167,7 +167,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             };
 
             // Now we can mutably borrow
-            mgr.state.lock_state.is_locked = true;
+            mgr.state.lock.is_locked = true;
             mgr.state.lock_notify.notify_one();
             
             // Run the lock-command if it exists
@@ -175,7 +175,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                 log_message(&format!("Running lock-command: {}", lock_cmd));
                 match run_command_detached(&lock_cmd).await {
                     Ok(pid) => {
-                        mgr.state.lock_state.process_info = Some(pid.clone());
+                        mgr.state.lock.process_info = Some(pid.clone());
                     }
                     Err(e) => {
                         log_message(&format!("Failed to run lock-command: {}", e));

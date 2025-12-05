@@ -63,7 +63,7 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
             return;
         }
         
-        if mgr.state.lock_state.is_locked {
+        if mgr.state.lock.is_locked {
             log_message("Lock screen action skipped: already locked");
             return;
         }
@@ -75,7 +75,7 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
     }
 
     if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
-        mgr.state.lock_state.is_locked = true;
+        mgr.state.lock.is_locked = true;
         mgr.state.lock_notify.notify_one();
         log_message("Lock screen action triggered, notifying lock watcher");
     }
@@ -141,8 +141,8 @@ pub async fn run_command_for_action(
 
                 match run_command_detached(lock_cmd).await {
                     Ok(process_info) => {
-                        mgr.state.lock_state.process_info = Some(process_info.clone());
-                        mgr.state.lock_state.is_locked = true;
+                        mgr.state.lock.process_info = Some(process_info.clone());
+                        mgr.state.lock.is_locked = true;
 
                         log_message(&format!(
                             "Lock started: PID={} PGID={}",
@@ -156,7 +156,7 @@ pub async fn run_command_for_action(
                 }
             } else {
                 log_warning_message("loginctl used but no lock-command configured.");
-                mgr.state.lock_state.is_locked = true;
+                mgr.state.lock.is_locked = true;
             }
 
             return;
@@ -176,8 +176,8 @@ pub async fn run_command_for_action(
                     process_info.expected_process_name = Some(lock_cmd.clone());
                 }
 
-                mgr.state.lock_state.process_info = Some(process_info.clone());
-                mgr.state.lock_state.is_locked = true;
+                mgr.state.lock.process_info = Some(process_info.clone());
+                mgr.state.lock.is_locked = true;
 
                 log_message(&format!(
                     "Lock started: PID={} PGID={} tracking={:?}",

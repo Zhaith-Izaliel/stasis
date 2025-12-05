@@ -80,7 +80,7 @@ pub fn spawn_lock_watcher(
             // Wait until lock becomes active
             {
                 let mut mgr = manager.lock().await;
-                while !mgr.state.lock_state.is_locked {
+                while !mgr.state.lock.is_locked {
                     let lock_notify = mgr.state.lock_notify.clone();
                     drop(mgr);
                     tokio::select! {
@@ -101,9 +101,9 @@ pub fn spawn_lock_watcher(
                 let (process_info, maybe_cmd, was_locked, shutdown, lock_notify) = {
                     let mgr = manager.lock().await;
                     (
-                        mgr.state.lock_state.process_info.clone(),
-                        mgr.state.lock_state.command.clone(),
-                        mgr.state.lock_state.is_locked,
+                        mgr.state.lock.process_info.clone(),
+                        mgr.state.lock.command.clone(),
+                        mgr.state.lock.is_locked,
                         mgr.state.shutdown_flag.clone(),
                         mgr.state.lock_notify.clone(),
                     )
@@ -126,7 +126,7 @@ pub fn spawn_lock_watcher(
                 if !still_active {
                     let mut mgr = manager.lock().await;
 
-                    if !mgr.state.lock_state.is_locked {
+                    if !mgr.state.lock.is_locked {
                         break;
                     }
 
@@ -145,10 +145,10 @@ pub fn spawn_lock_watcher(
                         }
                     }
 
-                    mgr.state.lock_state.process_info = None;
-                    mgr.state.lock_state.post_advanced = false;
-                    mgr.state.action_index = 0;
-                    mgr.state.lock_state.is_locked = false;
+                    mgr.state.lock.process_info = None;
+                    mgr.state.lock.post_advanced = false;
+                    mgr.state.actions.action_index = 0;
+                    mgr.state.lock.is_locked = false;
 
                     mgr.reset().await;
 
