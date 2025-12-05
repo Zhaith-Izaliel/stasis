@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{sync::Arc, future::Future, time::{Duration, Instant}};
 use tokio::{
     sync::Mutex, 
     time::{Instant as TokioInstant, sleep_until}
@@ -14,7 +14,7 @@ use crate::{
     log::{log_debug_message, log_message},
 };
 
-pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Future<Output = ()> + Send {
+pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl Future<Output = ()> + Send {
     async move {
         loop {
             // Grab both the next timeout and the notify handles
@@ -27,25 +27,23 @@ pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Future
                 )
             };
 
-            // Compute how long we should sleep           
+            // Compute how long we should sleep using tokio Instant (no drift)
+            let now = TokioInstant::now();
             let sleep_deadline = match next_instant {
-                Some(instant) => {
-                    let now = Instant::now();
-                    let max_sleep = Duration::from_secs(60); // wake periodically
-                    if instant <= now {
-                        now + Duration::from_millis(50)
-                    } else if instant - now > max_sleep {
-                        now + max_sleep
+                Some(next_std) => {
+                    let delta = if next_std > Instant::now() {
+                        next_std - Instant::now()
                     } else {
-                        instant
-                    }
+                        Duration::from_millis(50)
+                    };
+                    let max_sleep = Duration::from_secs(60);
+                    now + delta.min(max_sleep)
                 }
-                None => Instant::now() + Duration::from_secs(60),
+                None => now + Duration::from_secs(60),
             };
 
-
             tokio::select! {
-                _ = sleep_until(TokioInstant::from_std(sleep_deadline)) => {},
+                _ = sleep_until(sleep_deadline) => {},
                 _ = notify.notified() => {
                     // Woken up by external event (reset, AC change, playback)
                     continue; // recalc immediately
@@ -66,7 +64,7 @@ pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Future
     }
 }
 
-pub async fn spawn_lock_watcher(
+pub fn spawn_lock_watcher(
     manager: std::sync::Arc<tokio::sync::Mutex<crate::core::manager::Manager>>
 ) -> impl Future<Output = ()> + Send {
     use std::time::Duration;
@@ -134,9 +132,9 @@ pub async fn spawn_lock_watcher(
 
                     // Fire resume command if configured
                     use crate::config::model::IdleAction;
-                    if let Some(lock_action) = mgr.state.default_actions.iter()
-                        .chain(mgr.state.ac_actions.iter())
-                        .chain(mgr.state.battery_actions.iter())
+                    if let Some(lock_action) = mgr.state.power.default_actions.iter()
+                        .chain(mgr.state.power.ac_actions.iter())
+                        .chain(mgr.state.power.battery_actions.iter())
                         .find(|a| matches!(a.kind, IdleAction::LockScreen))
                     {
                         if let Some(resume_cmd) = &lock_action.resume_command {

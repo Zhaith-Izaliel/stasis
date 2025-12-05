@@ -22,7 +22,7 @@ pub async fn lock_still_active(state: &crate::core::manager::state::ManagerState
 pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     use crate::config::model::IdleAction;
 
-    let block_name = if !mgr.state.ac_actions.is_empty() || !mgr.state.battery_actions.is_empty() {
+    let block_name = if !mgr.state.power.ac_actions.is_empty() || !mgr.state.power.battery_actions.is_empty() {
         match mgr.state.on_battery() {
             Some(true) => "battery",
             Some(false) => "ac",
@@ -34,9 +34,9 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
 
     // Clone the actions so we don't borrow mgr mutably while iterating
     let actions_to_trigger: Vec<IdleActionBlock> = match block_name {
-        "ac" => mgr.state.ac_actions.clone(),
-        "battery" => mgr.state.battery_actions.clone(),
-        "default" => mgr.state.default_actions.clone(),
+        "ac" => mgr.state.power.ac_actions.clone(),
+        "battery" => mgr.state.power.battery_actions.clone(),
+        "default" => mgr.state.power.default_actions.clone(),
         _ => unreachable!(),
     };
 
@@ -61,9 +61,9 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     // Now update `last_triggered` after all actions are done
     let now = std::time::Instant::now();
     let actions_mut: &mut Vec<IdleActionBlock> = match block_name {
-        "ac" => &mut mgr.state.ac_actions,
-        "battery" => &mut mgr.state.battery_actions,
-        "default" => &mut mgr.state.default_actions,
+        "ac" => &mut mgr.state.power.ac_actions,
+        "battery" => &mut mgr.state.power.battery_actions,
+        "default" => &mut mgr.state.power.default_actions,
         _ => unreachable!(),
     };
 

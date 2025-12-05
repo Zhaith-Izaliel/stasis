@@ -42,19 +42,19 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
     let block = if let Some(explicit_block) = target_block {
         // User explicitly specified ac. or battery.
         match explicit_block {
-            "ac" => &mgr.state.ac_actions,
-            "battery" => &mgr.state.battery_actions,
-            _ => &mgr.state.default_actions,
+            "ac" => &mgr.state.power.ac_actions,
+            "battery" => &mgr.state.power.battery_actions,
+            _ => &mgr.state.power.default_actions,
         }
-    } else if !mgr.state.ac_actions.is_empty() || !mgr.state.battery_actions.is_empty() {
+    } else if !mgr.state.power.ac_actions.is_empty() || !mgr.state.power.battery_actions.is_empty() {
         // Auto-detect based on current power state
         match mgr.state.on_battery() {
-            Some(true) => &mgr.state.battery_actions,
-            Some(false) => &mgr.state.ac_actions,
-            None => &mgr.state.default_actions,
+            Some(true) => &mgr.state.power.battery_actions,
+            Some(false) => &mgr.state.power.ac_actions,
+            None => &mgr.state.power.default_actions,
         }
     } else {
-        &mgr.state.default_actions
+        &mgr.state.power.default_actions
     };
 
     let action_opt = block.iter().find(|a| {
@@ -125,26 +125,26 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
 
                 // Clear last_triggered for all actions
                 {
-                    let actions = &mut mgr.state.default_actions;
+                    let actions = &mut mgr.state.power.default_actions;
                     for a in actions.iter_mut() {
                         a.last_triggered = None;
                     }
                 }
                 {
-                    let actions = &mut mgr.state.ac_actions;
+                    let actions = &mut mgr.state.power.ac_actions;
                     for a in actions.iter_mut() {
                         a.last_triggered = None;
                     }
                 }
                 {
-                    let actions = &mut mgr.state.battery_actions;
+                    let actions = &mut mgr.state.power.battery_actions;
                     for a in actions.iter_mut() {
                         a.last_triggered = None;
                     }
                 }
 
                 // Determine active block name first
-                let active_block = if !mgr.state.ac_actions.is_empty() || !mgr.state.battery_actions.is_empty() {
+                let active_block = if !mgr.state.power.ac_actions.is_empty() || !mgr.state.power.battery_actions.is_empty() {
                     match mgr.state.on_battery() {
                         Some(true) => "battery",
                         Some(false) => "ac",
@@ -156,9 +156,9 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
 
                 // Now isolate block mutation
                 let actions = match active_block {
-                    "ac" => &mut mgr.state.ac_actions,
-                    "battery" => &mut mgr.state.battery_actions,
-                    _ => &mut mgr.state.default_actions,
+                    "ac" => &mut mgr.state.power.ac_actions,
+                    "battery" => &mut mgr.state.power.battery_actions,
+                    _ => &mut mgr.state.power.default_actions,
                 };
 
                 // Recalculate action index
@@ -200,6 +200,7 @@ pub async fn list_available_actions(manager: Arc<Mutex<Manager>>) -> Vec<String>
     let mgr = manager.lock().await;
     let mut actions = mgr
         .state
+        .power
         .default_actions
         .iter()
         .map(|a| strip_action_prefix(&a.name).to_string())

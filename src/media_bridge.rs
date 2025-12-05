@@ -1,5 +1,3 @@
-// media_bridge.rs - Adapter for external Firefox media bridge service
-//
 // This module provides an interface to an external media bridge (Python script + browser extension)
 // that reports per-tab media playback state via Unix socket. It's treated as external infrastructure,
 // similar to how we interface with MPRIS or D-Bus.

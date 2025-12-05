@@ -60,13 +60,13 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     let mut mgr = manager_clone.lock().await;
                     
                     // Clear MPRIS-based media state
-                    if mgr.state.media_playing && !mgr.state.browser_media_playing {
+                    if mgr.state.media.media_playing && !mgr.state.media.browser_media_playing {
                         crate::log::log_message(
                             "Clearing MPRIS media inhibitor before browser monitor takeover"
                         );
                         decr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media_playing = false;
-                        mgr.state.media_blocking = false;
+                        mgr.state.media.media_playing = false;
+                        mgr.state.media.media_blocking = false;
                     }
                 }
                 
@@ -107,10 +107,10 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                         "MPRIS reports media playing after browser monitor stopped"
                     );
                     let mut mgr = manager_clone.lock().await;
-                    if !mgr.state.media_playing {
+                    if !mgr.state.media.media_playing {
                         incr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media_playing = true;
-                        mgr.state.media_blocking = true;
+                        mgr.state.media.media_playing = true;
+                        mgr.state.media.media_blocking = true;
                     }
                 }
                 
@@ -152,7 +152,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     .as_ref()
                     .map(|c| c.media_blacklist.clone())
                     .unwrap_or_default();
-                (ignore, blacklist, mgr.state.media_bridge_active)
+                (ignore, blacklist, mgr.state.media.media_bridge_active)
             };
 
             // Only check MPRIS if browser bridge is not active
@@ -164,10 +164,10 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 );
                 if playing {
                     let mut mgr = manager.lock().await;
-                    if !mgr.state.media_playing {
+                    if !mgr.state.media.media_playing {
                         incr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media_playing = true;
-                        mgr.state.media_blocking = true;
+                        mgr.state.media.media_playing = true;
+                        mgr.state.media.media_blocking = true;
                     }
                 }
             }
@@ -185,7 +185,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                         .as_ref()
                         .map(|c| c.media_blacklist.clone())
                         .unwrap_or_default();
-                    (ignore, blacklist, mgr.state.browser_media_playing, mgr.state.media_bridge_active)
+                    (ignore, blacklist, mgr.state.media.browser_media_playing, mgr.state.media.media_bridge_active)
                 };
 
                 if bridge_active {
@@ -203,14 +203,14 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     let should_be_playing = browser_playing || any_non_browser_playing;
                     
                     // Only change inhibitor count for non-browser media changes
-                    if any_non_browser_playing && !mgr.state.media_playing {
+                    if any_non_browser_playing && !mgr.state.media.media_playing {
                         incr_active_inhibitor(&mut mgr).await;
-                    } else if !any_non_browser_playing && mgr.state.media_playing && !browser_playing {
+                    } else if !any_non_browser_playing && mgr.state.media.media_playing && !browser_playing {
                         decr_active_inhibitor(&mut mgr).await;
                     }
                     
-                    mgr.state.media_playing = should_be_playing;
-                    mgr.state.media_blocking = should_be_playing;
+                    mgr.state.media.media_playing = should_be_playing;
+                    mgr.state.media.media_blocking = should_be_playing;
                     
                     continue;
                 }
@@ -220,18 +220,18 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 let any_playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_ff);
                 
                 let mut mgr = manager.lock().await;
-                if any_playing && !mgr.state.media_playing {
+                if any_playing && !mgr.state.media.media_playing {
                     incr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media_playing = true;
-                    mgr.state.media_blocking = true;
-                } else if !any_playing && mgr.state.media_playing {
+                    mgr.state.media.media_playing = true;
+                    mgr.state.media.media_blocking = true;
+                } else if !any_playing && mgr.state.media.media_playing {
                     // MPRIS says nothing playing, but do final check with playerctl + pactl
                     if !skip_ff && has_playerctl_players() && has_any_media_playing() {
                         continue;
                     }
                     decr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media_playing = false;
-                    mgr.state.media_blocking = false;
+                    mgr.state.media.media_playing = false;
+                    mgr.state.media.media_blocking = false;
                 }
             }
         }

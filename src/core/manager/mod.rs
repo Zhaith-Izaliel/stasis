@@ -91,7 +91,7 @@ impl Manager {
         let cmd_to_check = self.state.lock_state.command.clone();
 
         // Clear only actions that are before or equal to the current stage
-        for actions in [&mut self.state.default_actions, &mut self.state.ac_actions, &mut self.state.battery_actions] {
+        for actions in [&mut self.state.power.default_actions, &mut self.state.power.ac_actions, &mut self.state.power.battery_actions] {
             let mut past_lock = false;
             for a in actions.iter_mut() {
                 if matches!(a.kind, crate::config::model::IdleAction::LockScreen) {
@@ -454,13 +454,13 @@ impl Manager {
         let playing = crate::core::services::media::check_media_playing(ignore_remote, &media_blacklist, false, );
 
         // Only change state via the helpers so behaviour stays consistent:
-        if playing && !self.state.media_playing {
+        if playing && !self.state.media.media_playing {
             // call the same helper the monitor uses
             incr_active_inhibitor(self).await;
-            self.state.media_playing = true;
-        } else if !playing && self.state.media_playing {
+            self.state.media.media_playing = true;
+        } else if !playing && self.state.media.media_playing {
             decr_active_inhibitor(self).await;
-            self.state.media_playing = false;
+            self.state.media.media_playing = false;
         }
     }
 
