@@ -83,7 +83,7 @@ impl Manager {
         // Reset notification state ONLY if not locked
         // When locked, we're just resetting for post-lock actions
         if !self.state.lock.is_locked {
-            self.state.notification_sent = false;
+            self.state.notifications.reset();
         }
 
         // Store values we need before borrowing
@@ -184,7 +184,7 @@ impl Manager {
         let is_locked = self.state.lock.is_locked;
         let last_activity = self.state.timing.last_activity;
         let debounce = self.state.debounce.main_debounce;
-        let notification_sent = self.state.notification_sent;
+        let notification_sent = self.state.notifications.notification_sent;
         
         // Extract config values before borrowing
         let (notify_enabled, notify_seconds) = if let Some(ref cfg) = self.state.cfg {
@@ -253,7 +253,7 @@ impl Manager {
                         log_message(&format!("Failed to send notification: {}", e));
                     }
                     
-                    self.state.notification_sent = true;
+                    self.state.notifications.mark_sent();
                     self.state.notify.notify_one();
                 }
                 
@@ -280,7 +280,7 @@ impl Manager {
         };
 
         // Reset notification flag after firing action
-        self.state.notification_sent = false;
+        self.state.notifications.reset();
 
         // Advance index
         self.state.actions.action_index += 1;
@@ -367,7 +367,7 @@ impl Manager {
 
             // Determine the next wake time
             let next_wake_time = if notify_enabled && action.notification.is_some() {
-                if !self.state.notification_sent {
+                if !self.state.notifications.notification_sent {
                     // Wake up at notification time (base_timeout_instant)
                     base_timeout_instant
                 } else {
