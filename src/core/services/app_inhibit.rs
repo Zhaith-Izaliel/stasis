@@ -5,7 +5,7 @@ use serde_json::Value;
 use procfs::process::all_processes;
 
 use crate::config::model::StasisConfig;
-use crate::core::manager::helpers::{decr_active_inhibitor, incr_active_inhibitor};
+use crate::core::manager::inhibitors::{decr_active_inhibitor, incr_active_inhibitor};
 use crate::log::{log_message, log_message_debug};
 use crate::core::manager::Manager;
 

@@ -5,7 +5,7 @@ use mpris::{PlayerFinder, PlaybackStatus};
 use tokio::task;
 use zbus::{Connection, MatchRule, MessageStream};
 
-use crate::core::manager::{helpers::{decr_active_inhibitor, incr_active_inhibitor}, Manager};
+use crate::core::manager::{inhibitors::{decr_active_inhibitor, incr_active_inhibitor}, Manager};
 
 // Players that are always considered local (browsers, local video players)
 const ALWAYS_LOCAL_PLAYERS: &[&str] = &[

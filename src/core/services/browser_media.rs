@@ -7,7 +7,7 @@ use tokio::time::{interval, Duration};
 use serde_json::Value;
 
 use crate::core::manager::{
-    helpers::{incr_active_inhibitor, decr_active_inhibitor},
+    inhibitors::{incr_active_inhibitor, decr_active_inhibitor},
     Manager
 };
 use crate::log::{log_message, log_error_message};
