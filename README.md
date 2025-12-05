@@ -139,6 +139,7 @@ Notes:
 <code>cargo</code> <br />
 <code>rust</code> <br />
 <code>dbus</code> <br />
+<code>libinput</code> <br />
 <code>libnotify</code> - <b>(optional)</b> for desktop notifications <br />
 <code>playerctl</code> - <b>(optional)</b> for enhanced media player detection <br />
 <code>pulseaudio</code> or <code>pipewire-pulse</code> - <b>(optional)</b> for audio detection <br />
