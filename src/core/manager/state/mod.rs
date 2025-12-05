@@ -4,6 +4,7 @@ pub mod debounce;
 pub mod inhibitors;
 pub mod lock;
 pub mod media;
+pub mod notifications;
 pub mod power;
 pub mod timing;
 
@@ -13,7 +14,7 @@ use tokio::sync::Notify;
 use crate::{
     config::model::{IdleActionBlock, StasisConfig},
     core::manager::state::{
-        actions::ActionState, brightness::BrightnessState, debounce::DebounceState, inhibitors::InhibitorState, lock::LockState, media::MediaState, power::PowerState, timing::TimingState
+        actions::ActionState, brightness::BrightnessState, debounce::DebounceState, inhibitors::InhibitorState, lock::LockState, media::MediaState, notifications::NotificationState, power::PowerState, timing::TimingState
     },
     log::log_debug_message,
 };
@@ -29,7 +30,7 @@ pub struct ManagerState {
     pub lock_notify: Arc<Notify>,
     pub media: MediaState,
     pub notify: Arc<Notify>,
-    pub notification_sent: bool,
+    pub notifications: NotificationState,
     pub power: PowerState,
     pub pre_suspend_command: Option<String>,
     pub shutdown_flag: Arc<Notify>,
@@ -50,7 +51,7 @@ impl Default for ManagerState {
             lock_notify: Arc::new(Notify::new()),
             media: MediaState::default(),
             notify: Arc::new(Notify::new()),
-            notification_sent: false,
+            notifications: NotificationState::default(),
             power: PowerState::new_from_config(&[]),
             pre_suspend_command: None,
             shutdown_flag: Arc::new(Notify::new()),
@@ -75,7 +76,7 @@ impl ManagerState {
             lock_notify: Arc::new(Notify::new()),
             media: MediaState::default(),
             notify: Arc::new(Notify::new()),
-            notification_sent: false,
+            notifications: NotificationState::default(),
             power,
             pre_suspend_command: cfg.pre_suspend_command.clone(),
             shutdown_flag: Arc::new(Notify::new()),
@@ -155,10 +156,6 @@ impl ManagerState {
 
     pub fn wake_idle_tasks(&self) {
         self.notify.notify_waiters();
-    }
-
-    pub fn set_locked(&mut self, locked: bool) {
-        self.lock.is_locked = locked;
     }
 
     pub fn is_manually_paused(&self) -> bool {
