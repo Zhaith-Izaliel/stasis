@@ -274,8 +274,8 @@ impl Manager {
         // Check if it's time to fire the action
         if now < actual_action_fire_instant {
             // Not ready yet
-            log_message(&format!("Action not ready yet, waiting {} more seconds", 
-                (actual_action_fire_instant - now).as_secs()));
+            //log_debug_message(&format!("Action not ready yet, waiting {} more seconds", 
+            //    (actual_action_fire_instant - now).as_secs()));
             return;
         }
 
