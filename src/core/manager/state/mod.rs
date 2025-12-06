@@ -14,7 +14,15 @@ use tokio::sync::Notify;
 use crate::{
     config::model::{IdleActionBlock, StasisConfig},
     core::manager::state::{
-        actions::ActionState, brightness::BrightnessState, debounce::DebounceState, inhibitors::InhibitorState, lock::LockState, media::MediaState, notifications::NotificationState, power::PowerState, timing::TimingState
+        actions::ActionState, 
+        brightness::BrightnessState, 
+        debounce::DebounceState, 
+        inhibitors::InhibitorState, 
+        lock::LockState, 
+        media::MediaState, 
+        notifications::NotificationState, 
+        power::PowerState, 
+        timing::TimingState
     },
     log::log_debug_message,
 };
@@ -132,7 +140,6 @@ impl ManagerState {
         self.brightness.reset();
         self.pre_suspend_command = cfg.pre_suspend_command.clone();
 
-        // CHANGED: power logic fully delegated
         self.power.reload_actions(&cfg.actions);
 
         // Reset last_triggered for active block

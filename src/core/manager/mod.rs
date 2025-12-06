@@ -16,13 +16,14 @@ pub use self::state::ManagerState;
 use crate::{
     config::model::{IdleAction, StasisConfig}, 
     core::manager::{
+        state::media::MediaState,
         actions::run_action,
         brightness::restore_brightness,
-        inhibitors::{decr_active_inhibitor, incr_active_inhibitor}, 
+        inhibitors::{decr_active_inhibitor, incr_active_inhibitor},
         processes::{is_process_running, run_command_detached},
         tasks::TaskManager,
     }, 
-    log::{log_debug_message, log_message}
+    log::{log_debug_message, log_error_message, log_message}
 };
 
 pub struct Manager {
@@ -462,6 +463,43 @@ impl Manager {
             decr_active_inhibitor(self).await;
             self.state.media.media_playing = false;
         }
+    }
+
+    pub async fn restart_media_monitoring(manager_arc: Arc<tokio::sync::Mutex<Manager>>) {
+        let should_monitor = {
+            let mgr = manager_arc.lock().await;
+            mgr.state.cfg
+                .as_ref()
+                .map(|c| c.monitor_media)
+                .unwrap_or(true)
+        };
+
+        if should_monitor {
+            log_message("Restarting media monitoring...");
+            if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
+                Arc::clone(&manager_arc)
+            ).await {
+                log_error_message(&format!("Failed to restart media monitor: {}", e));
+            }
+        }
+    }
+ 
+    pub async fn cleanup_media_monitoring(&mut self) {
+        log_message("Cleaning up media monitoring state");
+        
+        // Clear standard media inhibitor
+        if self.state.media.media_playing {
+            decr_active_inhibitor(self).await;
+        }
+        
+        // Clear browser tab inhibitors
+        let tab_count = self.state.media.browser_playing_tab_count;
+        for _ in 0..tab_count {
+            decr_active_inhibitor(self).await;
+        }
+        
+        // Reset media state
+        self.state.media = MediaState::default();
     }
 
     pub async fn shutdown(&mut self) {

@@ -27,6 +27,21 @@ const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
 ];
 
 pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<()> {
+    // Check if media monitoring is enabled
+    let monitor_media = {
+        let mgr = manager.lock().await;
+        mgr.state.cfg
+            .as_ref()
+            .map(|c| c.monitor_media)
+            .unwrap_or(true) // default to true if not set
+    };
+    
+    if !monitor_media {
+        crate::log::log_message("Media monitoring disabled in config");
+        return Ok(());
+    }
+
+
     let skip_firefox = is_bridge_available();
 
     // If Firefox extension exists, spawn the browser media monitor
