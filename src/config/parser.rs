@@ -33,6 +33,7 @@ fn is_special_key(key: &str) -> bool {
             | "lid_close_action" | "lid-close-action"
             | "lid_open_action" | "lid-open-action"
             | "media_blacklist" | "media-blacklist"
+            | "lock_detection_type" | "lock-detecton-type"
     )
 }
 
@@ -88,6 +89,8 @@ fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBloc
         } else {
             None
         };
+
+
 
         let notification = config
             .get::<String>(&format!("{}.{}.notification", path, key))
@@ -243,6 +246,16 @@ pub fn load_config() -> Result<StasisConfig> {
         .or_else(|_| config.get::<u64>("stasis.notify-seconds-before"))
         .unwrap_or(0);
 
+    let lock_detection_type = config
+        .get::<String>("stasis.lock_detection_type")
+        .or_else(|_| config.get::<String>("stasis.lock-detection-type"))
+        .ok()
+        .map(|s| match s.trim().to_lowercase().as_str() {
+            "logind" => LockDetectionType::Logind,
+            _ => LockDetectionType::Process,
+        })
+        .unwrap_or(LockDetectionType::Process); // Default to Process
+
     // Use Vec conversion with custom pattern parsing
     let inhibit_apps: Vec<AppInhibitPattern> = config
         .get_value("stasis.inhibit_apps")
@@ -309,6 +322,7 @@ pub fn load_config() -> Result<StasisConfig> {
     log_debug_message(&format!("  debounce_seconds = {:?}", debounce_seconds));
     log_debug_message(&format!("  lid_close_action = {:?}", lid_close_action));
     log_debug_message(&format!("  lid_open_action = {:?}", lid_open_action));
+    log_debug_message(&format!("  lock_detection_type = {:?}", lock_detection_type));
     log_debug_message(&format!(
         "  inhibit_apps = [{}]",
         inhibit_apps.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
@@ -322,7 +336,7 @@ pub fn load_config() -> Result<StasisConfig> {
 
         if let Some(lock_cmd) = &action.lock_command {
             details.push_str(&format!(", lock_command=\"{}\"", lock_cmd));
-        }
+        } 
         if let Some(resume_cmd) = &action.resume_command {
             details.push_str(&format!(", resume_command=\"{}\"", resume_cmd));
         }
@@ -346,5 +360,6 @@ pub fn load_config() -> Result<StasisConfig> {
         notify_on_unpause,
         notify_before_action,
         notify_seconds_before,
+        lock_detection_type,
     })
 }

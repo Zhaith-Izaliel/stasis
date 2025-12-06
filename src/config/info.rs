@@ -21,7 +21,7 @@ impl StasisConfig {
                                  "RespectInhibitors", "NotifyOnUnpause", "NotifyBeforeAction",
                                  "NotifySecondsBefore", "DebounceSeconds",
                                  "LidCloseAction", "LidOpenAction", "InhibitApps"];
-        let action_labels = vec!["Timeout", "Kind", "Command", "LockCommand", "Notification", "ResumeCommand"];
+        let action_labels = vec!["Timeout", "Kind", "Command", "LockCommand", "DetectionType", "Notification", "ResumeCommand"];
         
         let max_label = status_labels.iter()
             .chain(config_labels.iter())
@@ -98,6 +98,12 @@ impl StasisConfig {
             "  {:<width$} │ {}\n",
             "NotifyBeforeAction",
             if self.notify_before_action { "✓ enabled" } else { "✗ disabled" },
+            width = max_label
+        ));
+        out.push_str(&format!(
+            "  {:<width$} │ {:?}\n",
+            "LockDetectionType",
+            self.lock_detection_type,
             width = max_label
         ));
         out.push_str(&format!("  {:<width$} │ {}s\n", "NotifySecondsBefore", self.notify_seconds_before, width = max_label));

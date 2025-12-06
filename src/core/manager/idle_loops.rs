@@ -98,14 +98,19 @@ pub fn spawn_lock_watcher(
 
             // Monitor lock until it ends
             loop {
-                let (process_info, maybe_cmd, was_locked, shutdown, lock_notify) = {
+                let (process_info, maybe_cmd, was_locked, shutdown, lock_notify, detection_type) = {
                     let mgr = manager.lock().await;
+    
+                    
+                     let detection_type = mgr.state.cfg.as_ref().map(|cfg| cfg.lock_detection_type.clone());
+
                     (
                         mgr.state.lock.process_info.clone(),
                         mgr.state.lock.command.clone(),
                         mgr.state.lock.is_locked,
                         mgr.state.shutdown_flag.clone(),
                         mgr.state.lock_notify.clone(),
+                        detection_type,
                     )
                 };
 
@@ -113,14 +118,25 @@ pub fn spawn_lock_watcher(
                     break;
                 }
 
-                // Check if lock is still active
-                let still_active = if let Some(ref info) = process_info {
-                    is_process_active(info).await
-                } else if let Some(cmd) = maybe_cmd {
-                    is_process_running(&cmd).await
-                } else {
-                    sleep(Duration::from_millis(500)).await;
-                    true
+                // Check if lock is still active based on detection type
+                use crate::config::model::LockDetectionType;
+                let still_active = match detection_type {
+                    Some(LockDetectionType::Logind) => {
+                        // Use logind's LockedHint property
+                        use crate::core::manager::processes::is_session_locked_logind;
+                        is_session_locked_logind().await
+                    }
+                    Some(LockDetectionType::Process) | None => {
+                        // Use process detection (default)
+                        if let Some(ref info) = process_info {
+                            is_process_active(info).await
+                        } else if let Some(cmd) = maybe_cmd {
+                            is_process_running(&cmd).await
+                        } else {
+                            sleep(Duration::from_millis(500)).await;
+                            true
+                        }
+                    }
                 };
 
                 if !still_active {

@@ -87,6 +87,9 @@ stasis:
     command "loginctl lock-session"
     resume-command "notify-send 'Welcome Back $env.USER!'"
     lock-command "swaylock"
+    # If you use quickshell this is the detection type you need
+    # default: process
+    #detection-type "logind"
   end
 
   dpms:

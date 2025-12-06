@@ -224,3 +224,33 @@ pub async fn kill_process_group(info: &ProcessInfo) -> Result<()> {
     
     Ok(())
 }
+
+pub async fn is_session_locked_logind() -> bool {
+    match Command::new("busctl")
+        .args([
+            "get-property",
+            "--system",
+            "--",
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1/session/auto",
+            "org.freedesktop.login1.Session",
+            "LockedHint"
+        ])
+        .output()
+        .await
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let trimmed = stdout.trim();
+            
+            log_debug_message(&format!("logind LockedHint: {}", trimmed));
+            
+            // Output format: "b true" or "b false"
+            trimmed.contains("true")
+        }
+        Err(e) => {
+            log_debug_message(&format!("Failed to query logind LockedHint: {}", e));
+            false
+        }
+    }
+}
