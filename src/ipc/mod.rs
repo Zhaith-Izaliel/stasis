@@ -47,20 +47,76 @@ pub async fn spawn_ipc_socket_with_listener(
                                         "reload" => {
                                             match config::parser::load_config() {
                                                 Ok(new_cfg) => {
-                                                    let mut mgr = manager.lock().await;
-                                                    mgr.state.update_from_config(&new_cfg).await;
-                                                    mgr.recheck_media().await;
-                                                    mgr.trigger_instant_actions().await;
+                                                    // Check if monitor_media is changing
+                                                    let should_cleanup = {
+                                                        let mgr = manager.lock().await;
+                                                        let old_monitor = mgr.state.cfg
+                                                            .as_ref()
+                                                            .map(|c| c.monitor_media)
+                                                            .unwrap_or(true);
+                                                        let new_monitor = new_cfg.monitor_media;
+                                                        
+                                                        // Need cleanup if: was monitoring AND now disabled
+                                                        old_monitor && !new_monitor
+                                                    };
                                                     
-                                                    let idle_time = mgr.state.timing.last_activity.elapsed();
-                                                    let uptime = mgr.state.timing.start_time.elapsed();
-                                                    let manually_inhibited = mgr.state.inhibitors.manually_paused;
-                                                    let paused = mgr.state.inhibitors.paused;
-                                                    let media_blocking = mgr.state.media.media_blocking;
-                                                    let media_bridge_active = mgr.state.media.media_bridge_active;
-                                                    let cfg_clone = mgr.state.cfg.clone();
+                                                    // Cleanup media monitoring if being disabled
+                                                    if should_cleanup {
+                                                        let mut mgr = manager.lock().await;
+                                                        mgr.cleanup_media_monitoring().await;
+                                                        
+                                                        // Stop browser monitor if active
+                                                        if mgr.state.media.media_bridge_active {
+                                                            drop(mgr); // Release lock before calling stop_browser_monitor
+                                                            crate::core::services::browser_media::stop_browser_monitor(
+                                                                Arc::clone(&manager)
+                                                            ).await;
+                                                        }
+                                                    }
                                                     
-                                                    drop(mgr);
+                                                    // Update config
+                                                    {
+                                                        let mut mgr = manager.lock().await;
+                                                        mgr.state.update_from_config(&new_cfg).await;
+                                                    }
+                                                    
+                                                    // Restart media monitoring if enabled
+                                                    let new_monitor_media = new_cfg.monitor_media;
+                                                    if new_monitor_media {
+                                                        log_message("Restarting media monitoring after config reload...");
+                                                        if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
+                                                            Arc::clone(&manager)
+                                                        ).await {
+                                                            log_error_message(&format!("Failed to restart media monitor: {}", e));
+                                                        }
+                                                        
+                                                        // Give the monitor tasks a moment to start
+                                                        tokio::time::sleep(Duration::from_millis(100)).await;
+                                                        
+                                                        // ONLY recheck media if monitoring is enabled
+                                                        let mut mgr = manager.lock().await;
+                                                        mgr.recheck_media().await;
+                                                        mgr.trigger_instant_actions().await;
+                                                    } else {
+                                                        // Media monitoring disabled, just trigger instant actions
+                                                        let mut mgr = manager.lock().await;
+                                                        mgr.trigger_instant_actions().await;
+                                                    }
+                                                    
+                                                    // Get state for response
+                                                    let (idle_time, uptime, manually_inhibited, paused, media_blocking, 
+                                                         media_bridge_active, cfg_clone) = {
+                                                        let mgr = manager.lock().await;
+                                                        (
+                                                            mgr.state.timing.last_activity.elapsed(),
+                                                            mgr.state.timing.start_time.elapsed(),
+                                                            mgr.state.inhibitors.manually_paused,
+                                                            mgr.state.inhibitors.paused,
+                                                            mgr.state.media.media_blocking,
+                                                            mgr.state.media.media_bridge_active,
+                                                            mgr.state.cfg.clone()
+                                                        )
+                                                    };
 
                                                     {
                                                         let mut inhibitor = app_inhibitor.lock().await;
@@ -77,7 +133,6 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         Ok(result) => result,
                                                         Err(_) => false,
                                                     };
-
 
                                                     log_debug_message("Config reloaded successfully");
                                                     
