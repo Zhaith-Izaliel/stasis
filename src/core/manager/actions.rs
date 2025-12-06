@@ -58,13 +58,13 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
     if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
         if action.command.contains("loginctl lock-session") {
             if let Err(e) = run_command_detached(&action.command).await {
-                log_message(&format!("Failed to run loginctl lock-session: {}", e));
+                log_error_message(&format!("Failed to run loginctl lock-session: {}", e));
             }
             return;
         }
         
         if mgr.state.lock.is_locked {
-            log_message("Lock screen action skipped: already locked");
+            log_debug_message("Lock screen action skipped: already locked");
             return;
         }
     }
@@ -193,7 +193,17 @@ pub async fn run_command_for_action(
         return;
     }
 
-    // NON-lock case
+    // NON-lock case        
+    log_message(&format!("Running {} command: {}", 
+        match action.kind {
+            IdleAction::Suspend => "suspend",
+            IdleAction::Brightness => "brightness",
+            IdleAction::Dpms => "DPMS",
+            _ => "action"
+        },
+        cmd
+    ));
+
     let spawned = tokio::spawn(async move {
         if let Err(e) = run_command_silent(&cmd).await {
             log_message(&format!("Failed to run command '{}': {}", cmd, e));

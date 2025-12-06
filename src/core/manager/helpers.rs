@@ -157,9 +157,8 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
         mgr.state.actions.action_index = next_index;
         
         // CRITICAL: Set the next action's last_triggered so timeout calculation works
-        let debounce_end = now + debounce;
         if next_index < actions.len() {
-            actions[next_index].last_triggered = Some(debounce_end);
+            actions[next_index].last_triggered = Some(now);
             log_debug_message(&format!(
                 "Advanced to action index {} ({}), will fire in {}s",
                 next_index,
