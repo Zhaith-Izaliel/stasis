@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use crate::{
     core::manager::{
         actions::run_action, 
-        helpers::trigger_pre_suspend, 
+        helpers::{advance_past_lock, trigger_pre_suspend}, 
         Manager, 
         processes::{run_command_detached}},
     log::log_message,
@@ -114,7 +114,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
             run_action(&mut mgr, &action).await;
 
             // Mark as advanced past lock
-            mgr.advance_past_lock().await;
+            advance_past_lock(&mut mgr).await;
 
             // Reset timers
             let now = Instant::now();

@@ -398,11 +398,7 @@ impl Manager {
         min_time
     }
 
-    pub async fn advance_past_lock(&mut self) {
-        log_debug_message("Advancing state past lock stage...");
-        self.state.lock.post_advanced = true;
-        self.state.lock.last_advanced = Some(Instant::now());
-    }
+
 
     pub async fn pause(&mut self, manual: bool) {
         if manual {
