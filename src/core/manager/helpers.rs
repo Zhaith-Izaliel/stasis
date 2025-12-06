@@ -1,3 +1,4 @@
+use std::time::{Duration, Instant};
 use crate::{
     config::model::IdleActionBlock, 
     core::manager::{
@@ -5,7 +6,7 @@ use crate::{
         processes::{is_process_active, is_process_running, run_command_silent},
         Manager,
     },
-    log::log_message,
+    log::{log_debug_message, log_message},
 };
 
 pub async fn lock_still_active(state: &crate::core::manager::state::ManagerState) -> bool {
@@ -96,5 +97,79 @@ pub async fn trigger_pre_suspend(mgr: &mut Manager) {
             Ok(_) => log_message("Pre-suspend command finished"),
             Err(e) => log_message(&format!("Pre-suspend command failed: {}", e)),
         }
+    }
+}
+
+pub async fn advance_past_lock(mgr: &mut Manager) {
+    log_debug_message("Advancing state past lock stage...");
+    
+    let now = Instant::now();
+    mgr.state.lock.post_advanced = true;
+    mgr.state.lock.last_advanced = Some(now);
+    
+    // Get debounce from config
+    let debounce = if let Some(cfg) = &mgr.state.cfg {
+        Duration::from_secs(cfg.debounce_seconds as u64)
+    } else {
+        Duration::from_secs(5) // fallback
+    };
+    
+    // Reset timing state
+    mgr.state.timing.last_activity = now;
+    mgr.state.debounce.main_debounce = Some(now + debounce);
+    
+    // Clear last_triggered for all actions
+    for actions in [
+        &mut mgr.state.power.default_actions,
+        &mut mgr.state.power.ac_actions,
+        &mut mgr.state.power.battery_actions
+    ] {
+        for a in actions.iter_mut() {
+            a.last_triggered = None;
+        }
+    }
+    
+    // Determine active block
+    let active_block = if !mgr.state.power.ac_actions.is_empty() 
+        || !mgr.state.power.battery_actions.is_empty() 
+    {
+        match mgr.state.on_battery() {
+            Some(true) => "battery",
+            Some(false) => "ac",
+            None => "default",
+        }
+    } else {
+        "default"
+    };
+    
+    // Get mutable reference to active actions
+    let actions = match active_block {
+        "ac" => &mut mgr.state.power.ac_actions,
+        "battery" => &mut mgr.state.power.battery_actions,
+        _ => &mut mgr.state.power.default_actions,
+    };
+    
+    // Find lock index and advance past it
+    if let Some(lock_index) = actions.iter()
+        .position(|a| matches!(a.kind, crate::config::model::IdleAction::LockScreen))
+    {
+        let next_index = lock_index.saturating_add(1);
+        mgr.state.actions.action_index = next_index;
+        
+        // CRITICAL: Set the next action's last_triggered so timeout calculation works
+        let debounce_end = now + debounce;
+        if next_index < actions.len() {
+            actions[next_index].last_triggered = Some(debounce_end);
+            log_debug_message(&format!(
+                "Advanced to action index {} ({}), will fire in {}s",
+                next_index,
+                actions[next_index].name,
+                actions[next_index].timeout
+            ));
+        } else {
+            log_debug_message("Advanced past all actions (at end of chain)");
+        }
+    } else {
+        log_debug_message("No lock action found in active block");
     }
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::core::{
-    manager::{actions::run_action, Manager, processes::{run_command_detached}}
+    manager::{actions::run_action, helpers::advance_past_lock, Manager, processes::{run_command_detached}}
 };
 use crate::{config::model::{IdleAction, LidCloseAction, LidOpenAction}};
 use crate::log::{log_debug_message, log_error_message, log_message};
@@ -73,7 +73,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                 
         Event::LockScreenDetected => {
             let mut mgr = manager.lock().await;
-            mgr.advance_past_lock().await;
+            advance_past_lock(&mut mgr).await;
             mgr.state.wake_idle_tasks();
         }
 
@@ -186,7 +186,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             }
             
             // Advance past lock so subsequent actions (like DPMS/suspend) can trigger
-            mgr.advance_past_lock().await;
+            advance_past_lock(&mut mgr).await;
             
             // Wake the lock watcher loop
             mgr.state.wake_idle_tasks();
