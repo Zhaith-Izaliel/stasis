@@ -1,4 +1,3 @@
-use crate::log::log_debug_message;
 use std::time::Duration;
 
 pub enum ChassisKind {

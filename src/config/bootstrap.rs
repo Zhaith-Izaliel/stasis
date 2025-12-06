@@ -61,6 +61,10 @@ stasis:
   
   respect_idle_inhibitors true
 
+  # Lock detection method: "process" (default) or "logind"
+  # Use "logind" if your locker uses loginctl (e.g., quickshell)
+  #lock_detection_type "process"
+
   # For laptops:
   #
   # you can specify an action to do on lid close/open
@@ -193,6 +197,10 @@ stasis:
   # to ignore when inhibiting Stasis based on media playback
   #media_blacklist ["spotify"] 
   respect_idle_inhibitors true
+
+  # Lock detection method: "process" (default) or "logind"
+  # Use "logind" if your locker uses loginctl (e.g., quickshell)
+  #lock_detection_type "process"
   
   # debounce: default is 0s; can be customized if needed
   #debounce-seconds 4
@@ -250,3 +258,4 @@ end
     .trim_start()
     .to_string()
 }
+

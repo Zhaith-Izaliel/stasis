@@ -56,7 +56,25 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
     // For lock actions using loginctl, run the command but don't manage state
     // The LoginctlLock event will handle setting up the lock state
     if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
-        if action.command.contains("loginctl lock-session") {
+        // Check if using logind detection
+        use crate::config::model::LockDetectionType;
+        let use_logind = if let Some(cfg) = &mgr.state.cfg {
+            matches!(cfg.lock_detection_type, LockDetectionType::Logind)
+        } else {
+            false
+        };
+
+        if use_logind {
+            log_debug_message("Using logind detection for lock state");
+            
+            if action.command.contains("loginctl lock-session") {
+                if let Err(e) = run_command_detached(&action.command).await {
+                    log_error_message(&format!("Failed to run loginctl lock-session: {}", e));
+                }
+                return;
+            }
+        } else if action.command.contains("loginctl lock-session") {
+            // Legacy behavior for process detection with loginctl
             if let Err(e) = run_command_detached(&action.command).await {
                 log_error_message(&format!("Failed to run loginctl lock-session: {}", e));
             }
@@ -113,6 +131,7 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
         }
     }
 }
+
 
 pub async fn run_command_for_action(
     mgr: &mut crate::core::manager::Manager, 

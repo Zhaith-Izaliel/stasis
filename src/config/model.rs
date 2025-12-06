@@ -10,6 +10,12 @@ pub enum IdleAction {
     Custom,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LockDetectionType {
+    Process,
+    Logind,
+}
+
 impl Display for IdleAction {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
@@ -97,6 +103,7 @@ pub struct StasisConfig {
     pub notify_on_unpause: bool,
     pub notify_before_action: bool,
     pub notify_seconds_before: u64,
+    pub lock_detection_type: LockDetectionType,
 }
 
 impl std::fmt::Display for LidCloseAction {
