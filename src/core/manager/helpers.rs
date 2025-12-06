@@ -173,4 +173,3 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
         log_debug_message("No lock action found in active block");
     }
 }
-
