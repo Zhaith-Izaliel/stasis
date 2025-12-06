@@ -9,9 +9,9 @@ use crate::core::manager::{
     inhibitors::{decr_active_inhibitor, incr_active_inhibitor},
     Manager
 };
-use crate::core::services::browser_media::is_bridge_available;
 
 // Players that are always considered local (browsers, local video players)
+// Note: Firefox is intentionally included here but handled specially
 const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
     "firefox",
     "chrome",
@@ -33,7 +33,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         mgr.state.cfg
             .as_ref()
             .map(|c| c.monitor_media)
-            .unwrap_or(true) // default to true if not set
+            .unwrap_or(true)
     };
     
     if !monitor_media {
@@ -41,98 +41,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         return Ok(());
     }
 
-
-    let skip_firefox = is_bridge_available();
-
-    // If Firefox extension exists, spawn the browser media monitor
-    if skip_firefox {
-        crate::log::log_media_bridge_message(
-            "Media Bridge plugin detected, spawning browser media monitor"
-        );
-        crate::core::services::browser_media::spawn_browser_media_monitor(Arc::clone(&manager)).await;
-    } else {
-        crate::log::log_media_bridge_message(
-            "Browser MPRIS bridge not found, using standard MPRIS detection"
-        );
-    }
-
-    let manager_clone = Arc::clone(&manager);
-    task::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
-        let mut was_detected = skip_firefox;
-        
-        loop {
-            interval.tick().await;
-            let is_detected = is_bridge_available();
-            
-            if is_detected && !was_detected {
-                crate::log::log_media_bridge_message(
-                    "Browser MPRIS bridge now detected, transitioning to browser media monitor"
-                );
-                
-                // HANDOFF: MPRIS → Browser Extension
-                {
-                    let mut mgr = manager_clone.lock().await;
-                    
-                    // Clear MPRIS-based media state
-                    if mgr.state.media.media_playing && !mgr.state.media.browser_media_playing {
-                        crate::log::log_message(
-                            "Clearing MPRIS media inhibitor before browser monitor takeover"
-                        );
-                        decr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media.media_playing = false;
-                        mgr.state.media.media_blocking = false;
-                    }
-                }
-                
-                // Now spawn the browser monitor which will do a fresh check
-                crate::core::services::browser_media::spawn_browser_media_monitor(
-                    Arc::clone(&manager_clone)
-                ).await;
-                was_detected = true;
-            } else if !is_detected && was_detected {
-                crate::log::log_message(
-                    "Firefox MPRIS bridge lost, transitioning to standard MPRIS detection"
-                );
-                
-                // HANDOFF: Browser Extension → MPRIS
-                // Stop the browser monitor properly (this clears inhibitors)
-                crate::core::services::browser_media::stop_browser_monitor(
-                    Arc::clone(&manager_clone)
-                ).await;
-                
-                // Re-check MPRIS immediately to see if anything is actually playing
-                let (ignore_remote_media, media_blacklist) = {
-                    let mgr = manager_clone.lock().await;
-                    let ignore = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.ignore_remote_media)
-                        .unwrap_or(false);
-                    let blacklist = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.media_blacklist.clone())
-                        .unwrap_or_default();
-                    (ignore, blacklist)
-                };
-
-                // Check if MPRIS reports anything playing (skip_firefox=false now)
-                let playing = check_media_playing(ignore_remote_media, &media_blacklist, false);
-                if playing {
-                    crate::log::log_message(
-                        "MPRIS reports media playing after browser monitor stopped"
-                    );
-                    let mut mgr = manager_clone.lock().await;
-                    if !mgr.state.media.media_playing {
-                        incr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media.media_playing = true;
-                        mgr.state.media.media_blocking = true;
-                    }
-                }
-                
-                was_detected = false;
-            }
-        }
-    });
+    crate::log::log_message("Starting MPRIS media monitor (non-Firefox players)");
 
     task::spawn(async move {
         let conn = match Connection::session().await {
@@ -170,27 +79,31 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 (ignore, blacklist, mgr.state.media.media_bridge_active)
             };
 
-            // Only check MPRIS if browser bridge is not active
-            if !bridge_active {
-                let playing = check_media_playing(
-                    ignore_remote_media,
-                    &media_blacklist,
-                    is_bridge_available()
-                );
-                if playing {
-                    let mut mgr = manager.lock().await;
-                    if !mgr.state.media.media_playing {
-                        incr_active_inhibitor(&mut mgr).await;
-                        mgr.state.media.media_playing = true;
-                        mgr.state.media.media_blocking = true;
-                    }
+            // Always check non-Firefox players, regardless of bridge state
+            let playing = check_media_playing(
+                ignore_remote_media,
+                &media_blacklist,
+                bridge_active // skip Firefox if bridge is active
+            );
+            
+            if playing {
+                let mut mgr = manager.lock().await;
+                if !mgr.state.media.mpris_media_playing {
+                    crate::log::log_message("Initial MPRIS check: non-Firefox media playing");
+                    incr_active_inhibitor(&mut mgr).await;
+                    mgr.state.media.mpris_media_playing = true;
+                    
+                    // Update overall flags
+                    mgr.state.media.media_playing = true;
+                    mgr.state.media.media_blocking = true;
                 }
             }
         }
 
+        // Monitor MPRIS changes
         loop {
             if let Some(_msg) = stream.next().await {
-                let (ignore_remote_media, media_blacklist, browser_playing, bridge_active) = {
+                let (ignore_remote_media, media_blacklist, bridge_active) = {
                     let mgr = manager.lock().await;
                     let ignore = mgr.state.cfg
                         .as_ref()
@@ -200,58 +113,48 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                         .as_ref()
                         .map(|c| c.media_blacklist.clone())
                         .unwrap_or_default();
-                    (ignore, blacklist, mgr.state.media.browser_media_playing, mgr.state.media.media_bridge_active)
+                    (ignore, blacklist, mgr.state.media.media_bridge_active)
                 };
 
-                if bridge_active {
-                    // Check for non-browser media
-                    let skip_ff = true;
-                    let any_non_browser_playing = check_media_playing(
-                        ignore_remote_media,
-                        &media_blacklist,
-                        skip_ff
-                    );
-                    
-                    let mut mgr = manager.lock().await;
-                    
-                    // Update media_playing to reflect combined state
-                    let should_be_playing = browser_playing || any_non_browser_playing;
-                    
-                    // Only change inhibitor count for non-browser media changes
-                    if any_non_browser_playing && !mgr.state.media.media_playing {
-                        incr_active_inhibitor(&mut mgr).await;
-                    } else if !any_non_browser_playing && mgr.state.media.media_playing && !browser_playing {
-                        decr_active_inhibitor(&mut mgr).await;
-                    }
-                    
-                    mgr.state.media.media_playing = should_be_playing;
-                    mgr.state.media.media_blocking = should_be_playing;
-                    
-                    continue;
-                }
-
-                // Browser extension not active - use standard MPRIS for everything
-                let skip_ff = is_bridge_available();
-                let any_playing = check_media_playing(ignore_remote_media, &media_blacklist, skip_ff);
+                // Check non-Firefox players (or all players if bridge inactive)
+                let any_playing = check_media_playing(
+                    ignore_remote_media,
+                    &media_blacklist,
+                    bridge_active // skip Firefox if bridge is active
+                );
                 
                 let mut mgr = manager.lock().await;
-                if any_playing && !mgr.state.media.media_playing {
+                
+                // Update MPRIS-specific inhibitor
+                if any_playing && !mgr.state.media.mpris_media_playing {
+                    crate::log::log_message("MPRIS: non-Firefox media started");
                     incr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media.media_playing = true;
-                    mgr.state.media.media_blocking = true;
-                } else if !any_playing && mgr.state.media.media_playing {
-                    // MPRIS says nothing playing, but do final check with playerctl + pactl
-                    if !skip_ff && has_playerctl_players() && has_any_media_playing() {
+                    mgr.state.media.mpris_media_playing = true;
+                } else if !any_playing && mgr.state.media.mpris_media_playing {
+                    // Do final verification with playerctl + pactl
+                    if !bridge_active && has_playerctl_players() && has_any_media_playing() {
                         continue;
                     }
+                    
+                    crate::log::log_message("MPRIS: non-Firefox media stopped");
                     decr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media.media_playing = false;
-                    mgr.state.media.media_blocking = false;
+                    mgr.state.media.mpris_media_playing = false;
                 }
+                
+                // Update overall media state (combines MPRIS + browser)
+                update_combined_state(&mut mgr);
             }
         }
     });
+    
     Ok(())
+}
+
+/// Update the combined media_playing and media_blocking flags based on all sources
+fn update_combined_state(mgr: &mut Manager) {
+    let combined = mgr.state.media.mpris_media_playing || mgr.state.media.browser_media_playing;
+    mgr.state.media.media_playing = combined;
+    mgr.state.media.media_blocking = combined;
 }
 
 pub fn check_media_playing(
@@ -278,7 +181,7 @@ pub fn check_media_playing(
         return false;
     }
 
-    // Fallback for multi-tab Firefox
+    // Fallback for multi-tab Firefox (only if we're NOT skipping Firefox)
     if !skip_firefox && has_playerctl_players() && has_any_media_playing() {
         return true;
     }
@@ -286,6 +189,8 @@ pub fn check_media_playing(
     // Check each player
     for player in playing_players {
         let identity = player.identity().to_lowercase();
+        
+        // Skip Firefox if the bridge is handling it
         if skip_firefox && identity.contains("firefox") {
             continue;
         }
@@ -312,17 +217,18 @@ pub fn check_media_playing(
             return true;
         }
         
-        // For non-local players: two-pronged approach
-        if !has_any_media_playing() {
-            continue;
-        }
-        
+        // For non-local players:
         if ignore_remote_media {
-            if has_running_sink() {
+            // User wants to skip remote media:
+            // we only accept this player if it has a real local sink-input.
+            if is_player_local_by_pactl(&identity) {
                 return true;
+            } else {
+                // It's remote → ignore it
+                continue;
             }
-            continue;
         } else {
+            // Not ignoring remote → treat as real media
             return true;
         }
     }
@@ -344,18 +250,6 @@ fn has_any_media_playing() -> bool {
     !stdout.trim().is_empty()
 }
 
-fn has_running_sink() -> bool {
-    let output = match Command::new("sh")
-        .args(["-c", "pactl list sinks short | grep -i running"])
-        .output() {
-        Ok(o) => o,
-        Err(_) => return false,
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    !stdout.trim().is_empty()
-}
-
 fn has_playerctl_players() -> bool {
     let output = match Command::new("playerctl")
         .args(["-l"])
@@ -366,4 +260,19 @@ fn has_playerctl_players() -> bool {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     !stdout.trim().is_empty()
+}
+
+fn is_player_local_by_pactl(player_name: &str) -> bool {
+    let output = match Command::new("pactl")
+        .args(["list", "sink-inputs"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false, // pactl failed → assume not local
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    let needle = player_name.to_lowercase();
+
+    stdout.contains(&needle)
 }

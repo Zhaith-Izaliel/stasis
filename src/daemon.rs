@@ -16,6 +16,7 @@ use crate::{
             dbus::listen_for_power_events,
             input::spawn_input_task,
             media::spawn_media_monitor_dbus,
+            browser_media::spawn_browser_bridge_detector,
             power_detection::{detect_initial_power_state, spawn_power_source_monitor},
             wayland::setup as setup_wayland,
         }
@@ -28,8 +29,6 @@ use crate::{
 /// Spawn the daemon with all its background services
 pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     // Load config
-    // XDG_CONFIG_HOME/stasis/stasis.rune -> /etc/stasis/stasis.rune ->
-    // /usr/share/stasis/stasis.rune
     if verbose {
         log_message("Verbose mode enabled");
         crate::log::set_verbose(true);
@@ -39,7 +38,6 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     let manager = Manager::new(Arc::clone(&cfg));
     let manager = Arc::new(Mutex::new(manager));
 
-
     // Spawn internal background tasks
     {
         let mut mgr = manager.lock().await;
@@ -47,9 +45,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
         mgr.tasks.spawn_limited(spawn_lock_watcher(Arc::clone(&manager)));
         mgr.tasks.spawn_limited(spawn_input_task(Arc::clone(&manager)));
     }
-
-
-    
+ 
     // Spawn suspend event listener
     let dbus_manager = Arc::clone(&manager);
     tokio::spawn(async move {
@@ -79,11 +75,15 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
         Arc::clone(&cfg)
     ).await;
    
-    // Spawn media monitor task
+    // Spawn media monitors
     if cfg.monitor_media {
+        // MPRIS monitor (handles all non-Firefox players, or Firefox when bridge is unavailable)
         if let Err(e) = spawn_media_monitor_dbus(Arc::clone(&manager)).await {
-            log_error_message(&format!("Failed to spawn media monitor: {}", e));
+            log_error_message(&format!("Failed to spawn MPRIS media monitor: {}", e));
         }
+        
+        // Browser bridge detector (monitors for Firefox bridge and spawns dedicated monitor)
+        spawn_browser_bridge_detector(Arc::clone(&manager)).await;
     }
     
     // Wayland inhibitors integration loop setup
