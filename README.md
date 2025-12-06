@@ -21,12 +21,12 @@
 </p>
 
 <p align="center">
-  <a href="#-features">Features</a> •
-  <a href="#-installation">Installation</a> •
-  <a href="#-quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
   <a href="#compositor-support">Compositor Support</a> •
-  <a href="#-media-bridge-browser-plugin">Media Bridge Plugin</a> •
-  <a href="#-contributing">Contributing</a>
+  <a href="#media-bridge-browser-plugin">Media Bridge Plugin</a> •
+  <a href="#contributing">Contributing</a>
 </p>
 
 ---
@@ -58,9 +58,9 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - [x] **Custom notifications** - Run notifications before any command block as well as notify on unpause!  requires `libnotify`
 
 ### In Progress
-- [ ] **Refactoring** small portion of code base
-### Planned
+- [ ] Quickshell support via `busctl` using a config option
 - [ ] **User profiles / presets** – save and load different workflows for various scenarios (work, gaming, etc.).
+### Planned
 - [ ] **Logging & analytics** – historical idle data for power/performance insights.
 - [ ] **Power-saving optimizations** – CPU/GPU-aware idle handling.
 
