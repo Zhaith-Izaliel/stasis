@@ -8,6 +8,7 @@ pub struct MediaState {
     pub media_playing: bool,
     pub media_bridge_active: bool,
     pub media_blocking: bool,
+    pub mpris_media_playing: bool,
 }
 
 impl MediaState {
