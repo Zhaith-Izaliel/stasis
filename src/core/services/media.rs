@@ -41,7 +41,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         return Ok(());
     }
 
-    crate::log::log_message("Starting MPRIS media monitor (non-Firefox players)");
+    crate::log::log_message("Starting MPRIS media monitor");
 
     task::spawn(async move {
         let conn = match Connection::session().await {
@@ -89,7 +89,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             if playing {
                 let mut mgr = manager.lock().await;
                 if !mgr.state.media.mpris_media_playing {
-                    crate::log::log_message("Initial MPRIS check: non-Firefox media playing");
+                    crate::log::log_message("Initial MPRIS check: media playing");
                     incr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = true;
                     
@@ -127,7 +127,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 
                 // Update MPRIS-specific inhibitor
                 if any_playing && !mgr.state.media.mpris_media_playing {
-                    crate::log::log_message("MPRIS: non-Firefox media started");
+                    crate::log::log_message("MPRIS: media started");
                     incr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = true;
                 } else if !any_playing && mgr.state.media.mpris_media_playing {
@@ -136,7 +136,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                         continue;
                     }
                     
-                    crate::log::log_message("MPRIS: non-Firefox media stopped");
+                    crate::log::log_message("MPRIS: media stopped");
                     decr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = false;
                 }
