@@ -46,6 +46,7 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - **📝 Clean configuration** – uses the intuitive [RUNE](https://github.com/saltnpepper97/rune-cfg) configuration language
 - **⚡ Live reload** – update configuration without restarting the daemon
 
+
 ## Roadmap
 
 ### Complete
@@ -55,15 +56,15 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - [x] **Resume-command support** – Each action block can run an optional follow-up command after completion.  
 - [x] **Event-driven, minimal polling** – Stasis now relies primarily on two internal loops that notify others to wake from deep sleep, significantly reducing CPU and memory usage at idle.  
 - [x] **CLI per-state triggers** – Trigger a **specific state**, the **current state**, or **all states**, all while respecting previously completed actions.  
-- [x] **Custom notifications** - Run notifications before any command block as well as notify on unpause!  requires `libnotify`
+- [x] **Custom notifications** – Run notifications before any command block as well as notify on unpause! Requires `libnotify`.
+- [x] **Logind lock detection** – Optional `lock_detection_type` config for compositors using loginctl (e.g., quickshell). Uses `busctl` to query systemd-logind's LockedHint property.
 
 ### In Progress
-- [ ] Quickshell support via `busctl` using a config option
-- [ ] **User profiles / presets** – save and load different workflows for various scenarios (work, gaming, etc.).
-### Planned
-- [ ] **Logging & analytics** – historical idle data for power/performance insights.
-- [ ] **Power-saving optimizations** – CPU/GPU-aware idle handling.
+- [ ] **User profiles / presets** – Save and load different workflows for various scenarios (work, gaming, etc.).
 
+### Planned
+- [ ] **Logging & analytics** – Historical idle data for power/performance insights.
+- [ ] **Power-saving optimizations** – CPU/GPU-aware idle handling.
 
 ## Installation
 
