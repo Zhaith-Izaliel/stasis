@@ -94,17 +94,18 @@ impl Manager {
         for actions in [&mut self.state.power.default_actions, &mut self.state.power.ac_actions, &mut self.state.power.battery_actions] {
             let mut past_lock = false;
             for a in actions.iter_mut() {
-                if matches!(a.kind, crate::config::model::IdleAction::LockScreen) {
-                    past_lock = true;
-                }
-                // if locked, preserve stages past lock (so dpms/suspend remain offset correctly)
-                if is_locked && past_lock {
-                    continue;
-                }
-                
                 if a.is_instant() {
                     continue;
                 }
+
+                if matches!(a.kind, crate::config::model::IdleAction::LockScreen) {
+                    past_lock = true;
+                }
+
+                // if locked, preserve stages past lock (so dpms/suspend remain offset correctly)
+                if is_locked && past_lock {
+                    continue;
+                } 
 
                 a.last_triggered = None;
             }
