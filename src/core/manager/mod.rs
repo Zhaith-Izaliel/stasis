@@ -101,6 +101,11 @@ impl Manager {
                 if is_locked && past_lock {
                     continue;
                 }
+                
+                if a.is_instant() && self.state.actions.instants_triggered {
+                    continue;
+                }
+
                 a.last_triggered = None;
             }
         }
