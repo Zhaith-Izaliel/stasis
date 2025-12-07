@@ -113,7 +113,7 @@ fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBloc
 
 /// Load configuration with fallback chain:
 /// 1. Internal defaults (embedded from examples/)
-/// 2. Shipped defaults (/usr/share/stasis/stasis.rune)
+/// 2. Shipped examples (/usr/share/stasis/examples/stasis.rune)
 /// 3. System config (/etc/stasis/stasis.rune)
 /// 4. User config (~/.config/stasis/stasis.rune) - highest priority
 ///
@@ -125,7 +125,7 @@ fn load_merged_config() -> Result<RuneConfig> {
         .wrap_err("failed to parse internal default config")?;
 
     // 2. Try to load from filesystem with fallback chain
-    // Priority: user > system > shared
+    // Priority: user > system > shared examples
     let user_path = dirs::home_dir()
         .map(|mut p| {
             p.push(".config/stasis/stasis.rune");
@@ -133,7 +133,7 @@ fn load_merged_config() -> Result<RuneConfig> {
         });
     
     let system_path = PathBuf::from("/etc/stasis/stasis.rune");
-    let share_path = PathBuf::from("/usr/share/stasis/stasis.rune");
+    let share_path = PathBuf::from("/usr/share/stasis/examples/stasis.rune");
 
     // Try user config first, with system as fallback
     if let Some(user_path) = user_path {
@@ -154,10 +154,10 @@ fn load_merged_config() -> Result<RuneConfig> {
         return Ok(config);
     }
 
-    // Try share path as final fallback
+    // Try share path (examples) as final fallback
     if share_path.exists() {
         config = RuneConfig::from_file(&share_path)
-            .wrap_err_with(|| format!("failed to load shared config from {}", share_path.display()))?;
+            .wrap_err_with(|| format!("failed to load shared example config from {}", share_path.display()))?;
         log_debug_message(&format!("Loaded config from: {}", share_path.display()));
         return Ok(config);
     }
