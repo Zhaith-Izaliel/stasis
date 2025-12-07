@@ -93,10 +93,7 @@ impl ManagerState {
         }
     }
 
-    // -------------------------
-    // POWER WRAPPERS
-    // -------------------------
-
+    /// Power wrappers
     pub fn is_laptop(&self) -> bool {
         self.power.is_laptop()
     }
@@ -116,10 +113,8 @@ impl ManagerState {
         self.notify.notify_one();
     }
 
-    // -------------------------
-    // ACTION ACCESSORS
-    // -------------------------
 
+    /// Action wrappers
     pub fn get_active_actions(&self) -> &[IdleActionBlock] {
         self.power.active_actions()     // CHANGED
     }
@@ -132,10 +127,8 @@ impl ManagerState {
         self.power.active_instant_actions() // CHANGED
     }
 
-    // -------------------------
-    // CONFIG RELOAD
-    // -------------------------
 
+    /// Config reload
     pub async fn update_from_config(&mut self, cfg: &StasisConfig) {
         self.brightness.reset();
         self.pre_suspend_command = cfg.pre_suspend_command.clone();
