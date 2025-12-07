@@ -1,6 +1,6 @@
 [package]
 name = "stasis"
-version = "0.7.5"
+version = "0.8.0"
 edition = "2024"
 authors = ["Dustin Pilgrim <dustin.pilgrim1997@gmail.com>"]
 description = "A lightweight, Feature Rich Wayland idle manager written in Rust."
@@ -23,7 +23,7 @@ eyre = "0.6.12"
 futures = "0.3.31"
 futures-util = "0.3.31"
 input = "0.9.1"
-libc = "0.2.177"
+libc = "0.2.178"
 mpris = "2.0.1"
 once_cell = "1.21.3"
 procfs = "0.18.0"
