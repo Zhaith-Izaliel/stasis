@@ -102,7 +102,7 @@ impl Manager {
                     continue;
                 }
                 
-                if a.is_instant() && self.state.actions.instants_triggered {
+                if a.is_instant() {
                     continue;
                 }
 
