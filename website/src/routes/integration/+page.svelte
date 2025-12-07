@@ -5,6 +5,7 @@
   let activeSection = $state('');
   
   const sections = [
+    { id: 'quickshell', title: 'Quickshell' },
     { id: 'waybar', title: 'Waybar' }
   ];
   
@@ -43,13 +44,24 @@
   }
   
   // Code examples
+  const quickshellExample = `
+  stasis:
+    ...
+    lock-detection-type "logind"
+
+    lock-screen:
+      command "qs -c noctalia-shell ipc call lockScreen lock"
+    end
+  end
+`;
+
   const waybarIconCode = `"custom/stasis": {
   "exec": "stasis info --json",
   "format": "{icon}",
   "format-icons": {
-      "idle_active": "",
-      "idle_inhibited": "",
-      "manually_inhibited": "",
+      "idle_active": "",
+      "idle_inhibited": "",
+      "manually_inhibited": "",
       "not_running": "󰒲"
   },
   "tooltip": true,
@@ -89,6 +101,17 @@
   
   <main class="content">
     <h1>Integration</h1>
+
+    <section id="quickshell">
+      <h2>Quickshell</h2>
+
+      <h3>Example config</h3>
+      <p>To use stasis with <a href="https://www.quickshell.org">Quickshell</a> the required edits are needed<br />
+         Note: The bellow config is using <a href="https://github.com/noctalia-dev/noctalia-shell">Noctalia shell</a>
+      </p>
+      <CodeBlock code={quickshellExample} language="rune"/>
+
+    </section>
     
     <section id="waybar">
       <h2>Waybar</h2>
@@ -213,13 +236,9 @@ p {
   margin: 16px 0;
 }
 
-code {
-  background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 0.9em;
-  color: var(--text-primary);
+a {
+  text-decoration: none;
+  color: var(--accent);
 }
 
 /* === MOBILE === */

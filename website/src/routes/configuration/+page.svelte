@@ -324,12 +324,13 @@ end`;
     <section id="overview">
       <h2>Overview</h2>
       <p>
-        Stasis uses a <code>.rune</code> configuration file located at 
-        <code>$XDG_CONFIG_HOME/stasis/stasis.rune</code> (typically <code>~/.config/stasis/stasis.rune</code>).
-        On first run, Stasis automatically generates a default configuration file with sensible defaults.
+        Stasis uses a <code>.rune</code> configuration file. It first looks for configurations at 
+        <code>$XDG_CONFIG_HOME/stasis/stasis.rune</code> (typically <code>~/.config/stasis/stasis.rune</code>) for per user configurations.
+        for system wide configurations you can copy the example to `/etc/stasis/stasis.rune` and make edits accordingly.<br />
+        On first run, Stasis automatically generates a default configuration in `~/.config/stasis/stasis.rune` with sensible defaults.
       </p>
       <p>
-        The default configuration template is located at <code>/etc/stasis/stasis.rune</code>.
+        The default configuration template is located at <code>/usr/share/stasis/examples/stasis.rune</code>.
       </p>
       <p>
         The configuration is structured hierarchically with a main <code>stasis:</code> block containing

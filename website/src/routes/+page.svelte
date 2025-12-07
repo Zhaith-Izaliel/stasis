@@ -66,7 +66,7 @@
 
 <style>
   .hero {
-    min-height: calc(100vh - 70px);
+    min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;

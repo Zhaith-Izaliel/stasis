@@ -7,8 +7,9 @@ node_modules/
 .pnpm/
 
 # === SvelteKit / Vite build output ===
-build/           # Static site output from `pnpm build`
-**/.svelte-kit/     # Build cache
+build/
+.svelte-kit
+website/.svelte-kit
 .vercel/
 .output/
 

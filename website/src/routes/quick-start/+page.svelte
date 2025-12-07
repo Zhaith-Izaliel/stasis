@@ -9,7 +9,6 @@
     { id: 'group-setup', title: 'Group Setup' },
     { id: 'manual', title: 'Running Manually' },
     { id: 'systemd', title: 'Systemd Service' },
-    { id: 'troubleshooting', title: 'Troubleshooting' }
   ];
   
   onMount(() => {
@@ -212,66 +211,6 @@ systemctl --user enable --now stasis.service`;
       </p>
       <CodeBlock code="exec-once = systemctl --user start stasis" />
     </section>
-    
-    <section id="troubleshooting">
-      <h2>Troubleshooting</h2>
-      
-      <h3>Service stuck in "activating" state</h3>
-      <p>
-        This usually means the <code>WAYLAND_DISPLAY</code> environment variable isn't available yet. 
-        The service file includes a wait condition, but if issues persist:
-      </p>
-      <CodeBlock code="echo $WAYLAND_DISPLAY
-ls -la /run/user/$(id -u)/wayland-*" />
-      <p>
-        Make sure your compositor has started and the Wayland socket exists before starting Stasis.
-      </p>
-      
-      <h3>Service fails with exit code 203 (EXEC)</h3>
-      <p>
-        This means systemd can't execute the binary. Common causes:
-      </p>
-      <ul>
-        <li>The binary doesn't exist at the specified path</li>
-        <li>The binary isn't executable (<code>chmod +x</code> may be needed)</li>
-        <li>The path in <code>ExecStart=</code> is wrong</li>
-      </ul>
-      <p>Verify the binary location and update the service file:</p>
-      <CodeBlock code="which stasis
-# Then update ExecStart= in the service file to match" />
-      
-      <h3>Brightness controls (brightnessctl/light) stop working</h3>
-      <p>
-        This is usually caused by missing environment variables. The updated service file 
-        imports all necessary environment variables from your session. If issues persist:
-      </p>
-      <ul>
-        <li>Make sure you're in the <code>video</code> group</li>
-        <li>Restart the service after editing: <code>systemctl --user restart stasis.service</code></li>
-        <li>Check logs for errors: <code>journalctl --user -u stasis.service -f</code></li>
-      </ul>
-      
-      <h3>Permission denied errors</h3>
-      <p>
-        If you see permission errors in the logs:
-      </p>
-      <ul>
-        <li>Verify you're in the required groups: <code>groups $USER</code></li>
-        <li>Make sure you logged out and back in after adding groups</li>
-        <li>Check that <code>/dev/input/*</code> devices are accessible</li>
-      </ul>
-      
-      <h3>Starting from compositor config vs systemd</h3>
-      <p>
-        You can start Stasis from your compositor configuration instead of systemd, 
-        but <strong>not both at the same time</strong>. If using compositor startup:
-      </p>
-      <CodeBlock code={`# Hyprland example:
-exec-once = sleep 2 && stasis
-
-# Niri example:
-spawn-at-startup "stasis"`} />
-    </section>
   </main>
 </div>
 
@@ -358,13 +297,6 @@ spawn-at-startup "stasis"`} />
     font-size: 1.3rem;
     font-weight: 600;
     margin: 32px 0 12px 0;
-    color: var(--text-primary);
-  }
-  
-  h4 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin: 24px 0 12px 0;
     color: var(--text-primary);
   }
  
@@ -476,11 +408,6 @@ spawn-at-startup "stasis"`} />
       margin: 24px 0 10px 0;
     }
     
-    h4 {
-      font-size: 1.05rem;
-      margin: 20px 0 10px 0;
-    }
-    
     section {
       margin-bottom: 32px;
       scroll-margin-top: 100px;
@@ -525,10 +452,6 @@ spawn-at-startup "stasis"`} />
     
     h3 {
       font-size: 1.1rem;
-    }
-    
-    h4 {
-      font-size: 1rem;
     }
   }
 </style>
