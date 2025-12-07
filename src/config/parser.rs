@@ -346,6 +346,10 @@ pub fn load_config() -> Result<StasisConfig> {
         log_debug_message(&details);
     }
 
+    // Reorder actions: instants first, then the rest, keeping relative order
+    let mut actions = actions; // make mutable if not already
+    actions.sort_by_key(|a| a.timeout != 0);
+
     Ok(StasisConfig {
         actions,
         pre_suspend_command,

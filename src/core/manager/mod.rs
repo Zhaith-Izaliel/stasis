@@ -132,9 +132,18 @@ impl Manager {
             (is_instant, lock_index)
         }; // Borrow ends here
 
-        // Reset action_index
+        // Reset action_index     
         if !is_locked {
-            self.state.actions.action_index = 0;
+            let actions = self.state.get_active_actions();
+            let mut index = 0;
+            for a in actions {
+                if a.is_instant() {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            self.state.actions.action_index = index;
         }
 
         if is_instant {
