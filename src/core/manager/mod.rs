@@ -50,7 +50,22 @@ impl Manager {
             run_action(self, &action).await;
         }
 
+        // Mark instants as triggered
         self.state.actions.instants_triggered = true;
+
+        // Update action_index: set to one past the last instant action
+        let actions = self.state.get_active_actions();
+        let mut index = 0;
+        for a in actions {
+            if a.is_instant() {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        self.state.actions.action_index = index;
+
+        log_debug_message(&format!("Instant actions complete, starting at index {}", index));
     }
 
     pub fn reset_instant_actions(&mut self) {
