@@ -226,27 +226,32 @@ pub async fn kill_process_group(info: &ProcessInfo) -> Result<()> {
 }
 
 pub async fn is_session_locked_logind() -> bool {
-    match Command::new("busctl")
+    // Determine the correct login1 session path
+    let session_id = std::env::var("XDG_SESSION_ID").unwrap_or_else(|_| "self".into());
+    let session_path = format!("/org/freedesktop/login1/session/{}", session_id);
+
+    // Query LockedHint
+    let output = Command::new("busctl")
         .args([
             "get-property",
             "--system",
             "--",
             "org.freedesktop.login1",
-            "/org/freedesktop/login1/session/auto",
+            &session_path,
             "org.freedesktop.login1.Session",
-            "LockedHint"
+            "LockedHint",
         ])
         .output()
-        .await
-    {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        .await;
+
+    match output {
+        Ok(result) => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
             let trimmed = stdout.trim();
-            
-            log_debug_message(&format!("logind LockedHint: {}", trimmed));
-            
-            // Output format: "b true" or "b false"
-            trimmed.contains("true")
+            log_debug_message(&format!("logind LockedHint ({}): {}", session_id, trimmed));
+
+            // busctl format: "b true" or "b false"
+            trimmed.ends_with("true")
         }
         Err(e) => {
             log_debug_message(&format!("Failed to query logind LockedHint: {}", e));
@@ -254,3 +259,4 @@ pub async fn is_session_locked_logind() -> bool {
         }
     }
 }
+
