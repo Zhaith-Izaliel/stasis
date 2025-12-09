@@ -1,12 +1,11 @@
 use eyre::Result;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::manager::Manager;
 use crate::log::{log_error_message, log_wayland_message};
 
 use tokio::sync::Notify;
-use tokio::time::sleep;
 
 use wayland_client::{
     protocol::{wl_registry, wl_seat::WlSeat},
@@ -30,6 +29,7 @@ pub struct WaylandIdleData {
     pub active_inhibitors: u32,
     pub respect_inhibitors: bool,
     pub shutdown: Arc<Notify>,
+    pub should_stop: Arc<AtomicBool>,
 }
 
 impl WaylandIdleData {
@@ -43,6 +43,7 @@ impl WaylandIdleData {
             active_inhibitors: 0,
             respect_inhibitors,
             shutdown: Arc::new(Notify::new()),
+            should_stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -117,12 +118,14 @@ impl Dispatch<ExtIdleNotificationV1, ()> for WaylandIdleData {
 
             match event {
                 IdleEvent::Idled => {
-                    log_wayland_message("Compositor detected idle");
-                    mgr.check_timeouts().await;
+                    // Handled internally by libinput
                 }
-                IdleEvent::Resumed => {
-                    log_wayland_message("Compositor detected activity");
-                    mgr.reset().await;
+                IdleEvent::Resumed => { 
+                    if mgr.state.lock.is_locked && !mgr.state.actions.post_lock_resume_queue.is_empty() {
+                        log_wayland_message("Activity detected while locked - firing post-lock resume commands");
+                        mgr.fire_post_lock_resume_queue().await;
+                    }
+
                 }
                 _ => {}
             }
@@ -198,12 +201,14 @@ pub async fn setup(
 
     // Request idle notification if both notifier and seat are available
     if let (Some(notifier), Some(seat)) = (&app_data.idle_notifier, &app_data.seat) {
-        let timeout_ms = 5_000; // placeholder, can be dynamic
+        let timeout_ms = 100;
         let notification = notifier.get_idle_notification(timeout_ms, seat, &qh, ());
         app_data.notification = Some(notification);
         log_wayland_message("Wayland idle detection active");
     }
 
+    let should_stop = Arc::clone(&app_data.should_stop);
+    
     // Wrap in Arc<Mutex>
     let app_data = Arc::new(tokio::sync::Mutex::new(app_data));
 
@@ -212,25 +217,37 @@ pub async fn setup(
         Arc::clone(&mgr.state.shutdown_flag)
     };
 
-    // Event loop — safe and cooperative shutdown
+    // Spawn task to set stop flag when shutdown is triggered
     tokio::spawn({
-        let app_data = Arc::clone(&app_data);
+        let should_stop = Arc::clone(&should_stop);
         async move {
+            shutdown_flag.notified().await;
+            should_stop.store(true, Ordering::Relaxed);
+        }
+    });
+
+    // Event loop using blocking_dispatch in a blocking task
+    tokio::task::spawn_blocking({
+        let app_data = Arc::clone(&app_data);
+        move || {
             log_wayland_message("Wayland event loop started");
             loop {
-                tokio::select! {
-                    _ = shutdown_flag.notified() => {
+                if should_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                
+                let mut locked_data = tokio::runtime::Handle::current()
+                    .block_on(app_data.lock());
+                
+                // Use blocking_dispatch which waits for events
+                match event_queue.blocking_dispatch(&mut *locked_data) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        log_error_message(&format!("Wayland dispatch error: {}", e));
                         break;
-                    }
-                    _ = sleep(Duration::from_millis(500)) => {
-                        let mut locked_data = app_data.lock().await;
-                        if let Err(e) = event_queue.dispatch_pending(&mut *locked_data) {
-                            log_error_message(&format!("Wayland event error: {}", e));
-                        }
                     }
                 }
             }
-
             log_wayland_message("Wayland event loop shutting down...");
         }
     });
