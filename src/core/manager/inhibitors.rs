@@ -50,9 +50,6 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager) {
                 "Inhibitor removed (count: {} → {}): no more inhibitors → idle timers resumed",
                 prev, now
             ));
-
-            // fire resume commands queued (if any)
-            mgr.fire_resume_queue().await;
         } else {
             log_message(&format!(
                 "Inhibitor removed (count: {} → {}): manual pause still active, timers remain paused",

@@ -132,7 +132,6 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
     }
 }
 
-
 pub async fn run_command_for_action(
     mgr: &mut crate::core::manager::Manager, 
     action: &crate::config::model::IdleActionBlock, 
