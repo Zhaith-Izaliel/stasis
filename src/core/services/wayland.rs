@@ -201,7 +201,7 @@ pub async fn setup(
 
     // Request idle notification if both notifier and seat are available
     if let (Some(notifier), Some(seat)) = (&app_data.idle_notifier, &app_data.seat) {
-        let timeout_ms = 100;
+        let timeout_ms = 500;
         let notification = notifier.get_idle_notification(timeout_ms, seat, &qh, ());
         app_data.notification = Some(notification);
         log_wayland_message("Wayland idle detection active");
