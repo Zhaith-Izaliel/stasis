@@ -279,6 +279,20 @@ impl Manager {
             self.state.actions.action_index = index;
         }
 
+        // Fire appropriate resume queue based on lock state
+        if is_locked {
+            // While locked, fire post-lock resume commands (only once per lock session)
+            if !self.state.actions.post_lock_resumes_fired {
+                self.fire_post_lock_resume_queue().await;
+                self.state.actions.post_lock_resumes_fired = true;
+            }
+        } else {
+            // Not locked, fire all resume commands
+            self.fire_all_resume_queues().await;
+            // Reset the flag for next lock session
+            self.state.actions.post_lock_resumes_fired = false;
+        }
+
         if is_instant {
             return;
         }
@@ -309,21 +323,6 @@ impl Manager {
                 } 
             } 
         }
-        
-        // Fire appropriate resume queue based on lock state
-        if is_locked {
-            // While locked, fire post-lock resume commands (only once per lock session)
-            if !self.state.actions.post_lock_resumes_fired {
-                self.fire_post_lock_resume_queue().await;
-                self.state.actions.post_lock_resumes_fired = true;
-            }
-        } else {
-            // Not locked, fire all resume commands
-            self.fire_all_resume_queues().await;
-            // Reset the flag for next lock session
-            self.state.actions.post_lock_resumes_fired = false;
-        }
-
         
         self.state.notify.notify_one();
     }
