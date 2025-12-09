@@ -82,8 +82,8 @@ impl Manager {
         let actions = self.state.get_active_actions();
         actions.iter().position(|a| matches!(a.kind, IdleAction::LockScreen))
     }
-    
-    // Updated check_timeouts - add to resume queue when action fires
+
+    // Check if any actions have surpassed their timeout period
     pub async fn check_timeouts(&mut self) {
         if self.state.inhibitors.paused || self.state.inhibitors.manually_paused {
             return;
@@ -122,7 +122,8 @@ impl Manager {
             if let Some(prev_trig) = actions[index - 1].last_triggered {
                 prev_trig + timeout
             } else {
-                last_activity + timeout
+                let base = debounce.unwrap_or(last_activity);
+                base + timeout
             }
         } else {
             let base = debounce.unwrap_or(last_activity);
@@ -181,6 +182,12 @@ impl Manager {
                             // Pre-lock action - save for unlock
                             log_debug_message(&format!("Queueing pre-lock resume for: {}", action_clone.name));
                             self.state.actions.pre_lock_resume_queue.push(action_clone.clone());
+                            
+                            // DPMS exception: Also add to post-lock queue so it fires on reset while locked
+                            if matches!(action_clone.kind, IdleAction::Dpms) {
+                                log_debug_message(&format!("DPMS action - also queueing for post-lock resume: {}", action_clone.name));
+                                self.state.actions.post_lock_resume_queue.push(action_clone.clone());
+                            }
                         } else {
                             // Post-lock action - fire on next reset while locked
                             log_debug_message(&format!("Queueing post-lock resume for: {}", action_clone.name));
@@ -361,13 +368,20 @@ impl Manager {
             self.state.actions.post_lock_resume_queue.len()
         ));
 
-       
         let actions_to_fire: Vec<_> = self.state.actions.post_lock_resume_queue.drain(..).collect();
         for action in actions_to_fire.into_iter().rev() {
             if let Some(resume_cmd) = &action.resume_command {
                 log_message(&format!("Running resume command for action: {}", action.name));
                 if let Err(e) = run_command_detached(resume_cmd).await {
                     log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
+                }
+                
+                // If this was a DPMS action, remove it from pre-lock queue since we just fired it
+                if matches!(action.kind, IdleAction::Dpms) {
+                    self.state.actions.pre_lock_resume_queue.retain(|a| {
+                        !matches!(a.kind, IdleAction::Dpms) || a.name != action.name
+                    });
+                    log_debug_message(&format!("DPMS resume fired post-lock, removed from pre-lock queue: {}", action.name));
                 }
             }
         }
@@ -377,29 +391,56 @@ impl Manager {
 
     // New method: fire all resume commands (on unlock or if no lock)
     pub async fn fire_all_resume_queues(&mut self) {
-        let total_count = self.state.actions.pre_lock_resume_queue.len() 
-            + self.state.actions.post_lock_resume_queue.len();
+        // Calculate the actual number of commands that will fire
+        // (accounting for DPMS actions that appear in both queues)
+        let mut actual_count = self.state.actions.post_lock_resume_queue.len();
+        let dpms_names_in_post: Vec<String> = self.state.actions.post_lock_resume_queue
+            .iter()
+            .filter(|a| matches!(a.kind, IdleAction::Dpms))
+            .map(|a| a.name.clone())
+            .collect();
+        
+        // Count pre-lock actions, but skip DPMS actions that are already in post-lock
+        for action in &self.state.actions.pre_lock_resume_queue {
+            if matches!(action.kind, IdleAction::Dpms) && dpms_names_in_post.contains(&action.name) {
+                continue; // Don't count this one, it's a duplicate
+            }
+            actual_count += 1;
+        }
             
-        if total_count == 0 {
+        if actual_count == 0 {
             return;
         }
 
-        log_message(&format!("Firing {} total resume command(s)...", total_count));
+        log_message(&format!("Firing {} total resume command(s)...", actual_count));
 
-        // Fire pre-lock commands first
-        for action in self.state.actions.pre_lock_resume_queue.drain(..) {
+        // Fire post-lock commands first and track which DPMS actions we fire
+        let mut fired_dpms_names: Vec<String> = Vec::new();
+        
+        for action in self.state.actions.post_lock_resume_queue.drain(..) {
             if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running pre-lock resume command for action: {}", action.name));
+                log_message(&format!("Running post-lock resume command for action: {}", action.name));
                 if let Err(e) = run_command_detached(resume_cmd).await {
                     log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
+                }
+                
+                // Track DPMS actions we've fired
+                if matches!(action.kind, IdleAction::Dpms) {
+                    fired_dpms_names.push(action.name.clone());
                 }
             }
         }
 
-        // Then fire post-lock commands
-        for action in self.state.actions.post_lock_resume_queue.drain(..) {
+        // Fire pre-lock commands, but skip any DPMS actions we already fired
+        for action in self.state.actions.pre_lock_resume_queue.drain(..) {
+            // Skip DPMS actions that were already fired from post-lock queue
+            if matches!(action.kind, IdleAction::Dpms) && fired_dpms_names.contains(&action.name) {
+                log_debug_message(&format!("Skipping duplicate DPMS resume for: {}", action.name));
+                continue;
+            }
+            
             if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running post-lock resume command for action: {}", action.name));
+                log_message(&format!("Running pre-lock resume command for action: {}", action.name));
                 if let Err(e) = run_command_detached(resume_cmd).await {
                     log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
                 }

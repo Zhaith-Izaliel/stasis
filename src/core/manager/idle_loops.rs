@@ -166,7 +166,7 @@ pub fn spawn_lock_watcher(
                     mgr.state.actions.action_index = 0;
                     mgr.state.lock.is_locked = false;
 
-                    // NEW: Fire all pre-lock resume commands on unlock
+                    // Fire all pre-lock resume commands on unlock
                     mgr.fire_pre_lock_resume_queue().await;
 
                     mgr.reset().await;
