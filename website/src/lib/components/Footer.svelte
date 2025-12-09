@@ -34,7 +34,6 @@
         <li><a href="https://github.com/saltnpepper97/stasis" target="_blank" rel="noopener noreferrer">GitHub</a></li>
         <li><a href="https://github.com/saltnpepper97/stasis/issues" target="_blank" rel="noopener noreferrer">Report Issues</a></li>
         <li><a href="/contributing">Contributing</a></li>
-        <li><a href="https://discord.gg/your-invite" target="_blank" rel="noopener noreferrer">Discord Server</a></li>
       </ul>
     </div>
 
