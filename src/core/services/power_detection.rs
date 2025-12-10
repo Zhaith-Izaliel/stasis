@@ -3,14 +3,14 @@ use tokio::sync::Mutex;
 
 use crate::core::manager::Manager;
 use crate::core::events::handlers::{handle_event, Event};
-use crate::sdebug;
+use crate::{sdebug, sinfo};
 
 /// Detect initial AC/Battery state.
 /// Returns true if on AC power.
 pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
     let mgr = manager.lock().await;
     if !mgr.state.is_laptop() {
-        sdebug!("Power", "Desktop detected, skipping power source check");
+        sinfo!("Power", "Desktop detected, skipping power source check");
         return true;
     }
     drop(mgr);

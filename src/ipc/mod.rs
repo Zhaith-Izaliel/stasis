@@ -1,6 +1,4 @@
 pub mod commands;
-pub mod list;
-pub mod pause;
 pub mod handlers;
 pub mod router;
 pub mod server;

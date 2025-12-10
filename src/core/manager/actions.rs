@@ -196,7 +196,7 @@ pub async fn run_command_for_action(
 
     // NON-lock Case    
     sinfo!(
-        "Action",
+        "Stasis",
         "Running {} command: {}",
         match action.kind {
             IdleAction::Suspend => "suspend",

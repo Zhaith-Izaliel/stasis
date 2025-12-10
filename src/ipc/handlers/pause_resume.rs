@@ -9,10 +9,10 @@ pub async fn handle_pause(
     if args.eq_ignore_ascii_case("help") 
         || args == "-h" 
         || args == "--help" {
-        return crate::ipc::pause::PAUSE_HELP_MESSAGE.to_string();
+        return super::pause::PAUSE_HELP_MESSAGE.to_string();
     }
     
-    match crate::ipc::pause::handle_pause_command(manager, args).await {
+    match super::pause::handle_pause_command(manager, args).await {
         Ok(msg) => msg,
         Err(e) => format!("ERROR: {}", e),
     }

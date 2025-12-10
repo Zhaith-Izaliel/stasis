@@ -28,7 +28,7 @@ pub async fn route_command(
         // List
         cmd if cmd.starts_with("list") => {
             let args = cmd.strip_prefix("list").unwrap_or("").trim();
-            super::list::handle_list_command(manager, args).await
+            super::handlers::list::handle_list_command(manager, args).await
                 .unwrap_or_else(|e| format!("ERROR: {}", e))
         }
         

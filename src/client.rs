@@ -98,7 +98,7 @@ async fn handle_list(args: &[String]) -> Result<()> {
     if !args.is_empty() {
         let first_arg = args[0].as_str();
         if first_arg == "help" || first_arg == "--help" || first_arg == "-h" {
-            println!("{}", crate::ipc::list::LIST_HELP_MESSAGE);
+            println!("{}", crate::ipc::handlers::list::LIST_HELP_MESSAGE);
             return Ok(());
         }
     }
@@ -145,7 +145,7 @@ async fn handle_pause(args: &[String]) -> Result<()> {
     if !args.is_empty() {
         let first_arg = args[0].as_str();
         if first_arg == "help" || first_arg == "--help" || first_arg == "-h" {
-            println!("{}", crate::ipc::pause::PAUSE_HELP_MESSAGE);
+            println!("{}", crate::ipc::handlers::pause::PAUSE_HELP_MESSAGE);
             return Ok(());
         }
     }
