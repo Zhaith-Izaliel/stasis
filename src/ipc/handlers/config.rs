@@ -2,7 +2,10 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use crate::{
     config::{self, model::CombinedConfig},
-    core::{manager::Manager, services::app_inhibit::AppInhibitor},
+    core::{
+        manager::{Manager, helpers::{current_profile, list_profiles}},
+        services::app_inhibit::AppInhibitor
+    },
     sdebug, serror, sinfo,
 };
 
@@ -106,6 +109,8 @@ struct StateInfo {
     media_bridge_active: bool,
     app_blocking: bool,
     cfg: Option<Arc<crate::config::model::StasisConfig>>,
+    profile: Option<String>,
+    available_profiles: Vec<String>,
 }
 
 async fn collect_state_info(
@@ -113,8 +118,8 @@ async fn collect_state_info(
     app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
 ) -> StateInfo {
     let (idle_time, uptime, manually_inhibited, paused, media_blocking, 
-         media_bridge_active, cfg) = {
-        let mgr = manager.lock().await;
+         media_bridge_active, cfg, profile, available_profiles) = {
+        let mut mgr = manager.lock().await;
         (
             mgr.state.timing.last_activity.elapsed(),
             mgr.state.timing.start_time.elapsed(),
@@ -122,7 +127,9 @@ async fn collect_state_info(
             mgr.state.inhibitors.paused,
             mgr.state.media.media_blocking,
             mgr.state.media.media_bridge_active,
-            mgr.state.cfg.clone()
+            mgr.state.cfg.clone(),
+            current_profile(&mut mgr),
+            list_profiles(&mut mgr)
         )
     };
     
@@ -143,11 +150,19 @@ async fn collect_state_info(
         media_bridge_active,
         app_blocking,
         cfg,
+        profile,
+        available_profiles,
     }
 }
 
 fn format_reload_response(info: StateInfo) -> String {
     if let Some(cfg) = &info.cfg {
+        let profiles = if info.available_profiles.is_empty() {
+            None
+        } else {
+            Some(info.available_profiles.as_slice())
+        };
+        
         format!(
             "Config reloaded successfully\n\n{}",
             cfg.pretty_print(
@@ -157,7 +172,9 @@ fn format_reload_response(info: StateInfo) -> String {
                 Some(info.manually_inhibited),
                 Some(info.app_blocking),
                 Some(info.media_blocking),
-                Some(info.media_bridge_active)
+                Some(info.media_bridge_active),
+                info.profile.as_deref(),
+                profiles
             )
         )
     } else {

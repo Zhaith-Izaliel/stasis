@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use crate::{
     core::{
-        manager::{Manager, helpers::current_profile},
+        manager::{Manager, helpers::{current_profile, list_profiles}},
         services::app_inhibit::AppInhibitor,
         utils::format_duration,
     },
@@ -60,6 +60,7 @@ struct StateSnapshot {
     media_bridge_active: bool,
     cfg: Option<Arc<crate::config::model::StasisConfig>>,
     profile: Option<String>,
+    available_profiles: Vec<String>,
 }
 
 async fn collect_state(mgr: &mut Manager) -> StateSnapshot {
@@ -72,6 +73,7 @@ async fn collect_state(mgr: &mut Manager) -> StateSnapshot {
         media_bridge_active: mgr.state.media.media_bridge_active,
         cfg: mgr.state.cfg.clone(),
         profile: current_profile(mgr),
+        available_profiles: list_profiles(mgr),
     }
 }
 
@@ -131,23 +133,23 @@ fn format_text_response(state: &StateSnapshot, app_blocking: bool) -> String {
     let idle_inhibited = state.paused || app_blocking || state.manually_inhibited;
     
     if let Some(cfg) = &state.cfg {
-        let mut info = cfg.pretty_print(
+        let profiles = if state.available_profiles.is_empty() {
+            None
+        } else {
+            Some(state.available_profiles.as_slice())
+        };
+        
+        cfg.pretty_print(
             Some(state.idle_time),
             Some(state.uptime),
             Some(idle_inhibited),
             Some(state.manually_inhibited),
             Some(app_blocking),
             Some(state.media_blocking),
-            Some(state.media_bridge_active)
-        );
-        
-        if let Some(p) = &state.profile {
-            info.push_str(&format!("\n\nActive profile: {}", p));
-        } else {
-            info.push_str("\n\nActive profile: base config");
-        }
-        
-        info
+            Some(state.media_bridge_active),
+            state.profile.as_deref(),
+            profiles
+        )
     } else {
         "No configuration loaded".to_string()
     }
