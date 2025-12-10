@@ -13,16 +13,13 @@ use crate::media_bridge;
 const POLL_INTERVAL_MS: u64 = 1000;
 const BRIDGE_CHECK_INTERVAL_SECS: u64 = 10;
 
-// Coordination state for the monitor task
 static MONITOR_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Check if the external Firefox media bridge is available
 pub fn is_bridge_available() -> bool {
     media_bridge::is_available()
 }
 
-/// Start monitoring for browser bridge availability and spawn monitor when detected
 pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
     let manager_clone = Arc::clone(&manager);
     
@@ -30,7 +27,6 @@ pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
         let mut interval = tokio::time::interval(Duration::from_secs(BRIDGE_CHECK_INTERVAL_SECS));
         let mut was_available = false;
         
-        // Check immediately on startup
         if is_bridge_available() {
             log_media_bridge_message("Browser bridge detected at startup");
             activate_browser_monitor(Arc::clone(&manager_clone)).await;
@@ -58,13 +54,10 @@ pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
 
 /// Activate the browser monitor and update manager state
 async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
-    // Set bridge active flag so MPRIS monitor skips Firefox
     {
         let mut mgr = manager.lock().await;
         
-        // If there was MPRIS-detected Firefox media, clear it since bridge will handle it now
         if mgr.state.media.mpris_media_playing {
-            // Check if the only thing playing was Firefox
             let _bridge_active = false; // temporarily set to false to check Firefox
             let ignore_remote = mgr.state.cfg
                 .as_ref()
@@ -83,7 +76,6 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
             );
             
             if !non_ff_playing {
-                // Only Firefox was playing, clear the MPRIS inhibitor
                 log_message("Clearing MPRIS inhibitor (Firefox transitioning to bridge)");
                 decr_active_inhibitor(&mut mgr).await;
                 mgr.state.media.mpris_media_playing = false;
@@ -93,16 +85,11 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
         mgr.state.media.media_bridge_active = true;
     }
     
-    // Spawn the actual monitor task
     spawn_browser_media_monitor(Arc::clone(&manager)).await;
 }
 
-/// Deactivate the browser monitor and clean up state
 async fn deactivate_browser_monitor(manager: Arc<Mutex<Manager>>) {
-    // Stop the monitor task and clear browser inhibitors
     stop_browser_monitor(Arc::clone(&manager)).await;
-    
-    // MPRIS monitor will naturally pick up Firefox again since bridge_active is now false
 }
 
 /// Stop the browser monitor and clean up state
@@ -132,31 +119,25 @@ pub async fn stop_browser_monitor(manager: Arc<Mutex<Manager>>) {
             }
         }
         
-        // Reset all browser-related state
         mgr.state.media.browser_playing_tab_count = 0;
         mgr.state.media.browser_media_playing = false;
         mgr.state.media.media_bridge_active = false;
         
-        // Update combined state
         update_combined_state(&mut mgr);
     }
     
-    // Reset coordination flags for next spawn
     MONITOR_RUNNING.store(false, Ordering::SeqCst);
     MONITOR_SHUTDOWN.store(false, Ordering::SeqCst);
     
     log_message("Browser media monitor stopped");
 }
 
-/// Spawn a background task that polls the external browser media bridge
 async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
-    // Prevent multiple monitors from running simultaneously
     if MONITOR_RUNNING.swap(true, Ordering::SeqCst) {
         log_media_bridge_message("Browser media monitor already running, skipping spawn");
         return;
     }
 
-    // Initialize manager state for bridge monitoring
     {
         let mut mgr = manager.lock().await;
         mgr.state.media.browser_playing_tab_count = 0;
@@ -171,7 +152,6 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
         log_media_bridge_message("Browser media monitor started");
         
         loop {
-            // Check for shutdown signal
             if MONITOR_SHUTDOWN.load(Ordering::SeqCst) {
                 log_message("Browser media monitor received shutdown signal, exiting");
                 break;
@@ -179,7 +159,6 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
             
             poll_interval.tick().await;
             
-            // Query the external bridge
             match media_bridge::query_status() {
                 Ok(state) => {
                     if !connected {
@@ -187,7 +166,6 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                         connected = true;
                     }
                     
-                    // Check if state changed since last poll
                     let state_changed = last_state
                         .as_ref()
                         .map(|last| state.has_changed_from(last))
@@ -218,7 +196,6 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
     });
 }
 
-/// Update manager state based on browser media changes
 async fn update_manager_state(
     manager: Arc<Mutex<Manager>>,
     new_state: &media_bridge::BrowserMediaState,
@@ -256,10 +233,7 @@ async fn update_manager_state(
         }
     }
 
-    // Update the browser media playing flag
-    mgr.state.media.browser_media_playing = new_tab_count > 0;
-    
-    // Update combined state
+    mgr.state.media.browser_media_playing = new_tab_count > 0; 
     update_combined_state(&mut mgr);
 }
 

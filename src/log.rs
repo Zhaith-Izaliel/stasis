@@ -8,7 +8,6 @@ use std::sync::{Mutex, Once};
 /// Maximum log file size in bytes before rotation (50 MB)
 const MAX_LOG_SIZE: u64 = 50 * 1024 * 1024;
 
-/// Log levels
 #[derive(PartialEq, PartialOrd, Clone, Debug)]
 pub enum LogLevel {
     Error = 1,
@@ -17,7 +16,6 @@ pub enum LogLevel {
     Debug = 4,
 }
 
-/// Global runtime config
 pub struct Config {
     pub level: LogLevel,
 }
@@ -28,22 +26,18 @@ pub static GLOBAL_CONFIG: Lazy<Mutex<Config>> = Lazy::new(|| {
     })
 });
 
-/// Ensures session separator is only added once per program run
 static SESSION_SEPARATOR: Once = Once::new();
 
-/// Convenience function: toggle verbose output
 pub fn set_verbose(enabled: bool) {
     let mut config = GLOBAL_CONFIG.lock().unwrap();
     config.level = if enabled { LogLevel::Debug } else { LogLevel::Info };
 }
 
-/// Directly set log level
 pub fn set_log_level(level: LogLevel) {
     let mut config = GLOBAL_CONFIG.lock().unwrap();
     config.level = level;
 }
 
-/// Core logging function
 fn log(level: LogLevel, prefix: &str, message: &str) {
     let config = GLOBAL_CONFIG.lock().unwrap();
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
@@ -86,7 +80,6 @@ pub fn log_path() -> PathBuf {
     path
 }
 
-/// Rotate the log if too big
 fn rotate_log_if_needed(path: &PathBuf) {
     if let Ok(meta) = metadata(path) {
         if meta.len() >= MAX_LOG_SIZE {
@@ -95,7 +88,6 @@ fn rotate_log_if_needed(path: &PathBuf) {
     }
 }
 
-/// Ensure newline is added only once per session, and only if file has content
 fn ensure_session_newline_once(path: &PathBuf) {
     SESSION_SEPARATOR.call_once(|| {
         if let Ok(meta) = metadata(path) {

@@ -151,13 +151,11 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             let mut mgr = manager.lock().await;
             log_debug_message("loginctl lock-session received — handling lock...");
 
-            // Skip if already locked
             if mgr.state.lock.is_locked {
                 log_message("Already locked, ignoring loginctl lock-session event");
                 return;
             }
 
-            // Clone the lock-command before mutably borrowing
             let lock_cmd_opt = if let Some(cfg) = &mgr.state.cfg {
                 cfg.actions.iter()
                     .find(|a| a.kind == IdleAction::LockScreen)
@@ -166,7 +164,6 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                 None
             };
 
-            // Now we can mutably borrow
             mgr.state.lock.is_locked = true;
             mgr.state.lock_notify.notify_one();
             
@@ -185,10 +182,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                 log_message("No lock-command configured");
             }
             
-            // Advance past lock so subsequent actions (like DPMS/suspend) can trigger
-            advance_past_lock(&mut mgr).await;
-            
-            // Wake the lock watcher loop
+            advance_past_lock(&mut mgr).await; 
             mgr.state.wake_idle_tasks();
         }
 
@@ -196,7 +190,6 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             let mut mgr = manager.lock().await;
             log_debug_message("loginctl unlock-session received — resetting state...");
             
-            // Reset the manager state as if user activity occurred
             mgr.reset().await;
             mgr.state.lock_notify.notify_waiters();
             mgr.state.wake_idle_tasks();

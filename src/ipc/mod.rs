@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod list;
 pub mod pause;
 
 use std::sync::Arc;
@@ -19,7 +20,6 @@ use crate::{
     SOCKET_PATH
 };
 
-/// Spawn the IPC control socket task using a pre-bound listener.
 pub async fn spawn_ipc_socket_with_listener(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
@@ -45,43 +45,37 @@ pub async fn spawn_ipc_socket_with_listener(
                                     let response = match cmd.as_str() {
                                         // === CONFIG ===
                                         "reload" => {
-                                            match config::parser::load_config() {
-                                                Ok(new_cfg) => {
-                                                    // Check if monitor_media is changing
+                                            match config::parser::load_combined_config() {
+                                                Ok(combined) => {
                                                     let should_cleanup = {
                                                         let mgr = manager.lock().await;
                                                         let old_monitor = mgr.state.cfg
                                                             .as_ref()
                                                             .map(|c| c.monitor_media)
                                                             .unwrap_or(true);
-                                                        let new_monitor = new_cfg.monitor_media;
-                                                        
-                                                        // Need cleanup if: was monitoring AND now disabled
+                                                        let new_monitor = combined.base.monitor_media;
                                                         old_monitor && !new_monitor
                                                     };
                                                     
-                                                    // Cleanup media monitoring if being disabled
                                                     if should_cleanup {
                                                         let mut mgr = manager.lock().await;
                                                         mgr.cleanup_media_monitoring().await;
                                                         
-                                                        // Stop browser monitor if active
                                                         if mgr.state.media.media_bridge_active {
-                                                            drop(mgr); // Release lock before calling stop_browser_monitor
+                                                            drop(mgr);
                                                             crate::core::services::browser_media::stop_browser_monitor(
                                                                 Arc::clone(&manager)
                                                             ).await;
                                                         }
                                                     }
                                                     
-                                                    // Update config
                                                     {
                                                         let mut mgr = manager.lock().await;
-                                                        mgr.state.update_from_config(&new_cfg).await;
+                                                        mgr.state.update_from_config(&combined.base).await;
+                                                        mgr.state.reload_profiles(&combined).await;
                                                     }
                                                     
-                                                    // Restart media monitoring if enabled
-                                                    let new_monitor_media = new_cfg.monitor_media;
+                                                    let new_monitor_media = combined.base.monitor_media;
                                                     if new_monitor_media {
                                                         log_message("Restarting media monitoring after config reload...");
                                                         if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
@@ -90,20 +84,16 @@ pub async fn spawn_ipc_socket_with_listener(
                                                             log_error_message(&format!("Failed to restart media monitor: {}", e));
                                                         }
                                                         
-                                                        // Give the monitor tasks a moment to start
                                                         tokio::time::sleep(Duration::from_millis(100)).await;
                                                         
-                                                        // ONLY recheck media if monitoring is enabled
                                                         let mut mgr = manager.lock().await;
                                                         mgr.recheck_media().await;
                                                         mgr.trigger_instant_actions().await;
                                                     } else {
-                                                        // Media monitoring disabled, just trigger instant actions
                                                         let mut mgr = manager.lock().await;
                                                         mgr.trigger_instant_actions().await;
                                                     }
                                                     
-                                                    // Get state for response
                                                     let (idle_time, uptime, manually_inhibited, paused, media_blocking, 
                                                          media_bridge_active, cfg_clone) = {
                                                         let mgr = manager.lock().await;
@@ -120,7 +110,7 @@ pub async fn spawn_ipc_socket_with_listener(
 
                                                     {
                                                         let mut inhibitor = app_inhibitor.lock().await;
-                                                        inhibitor.update_from_config(&new_cfg).await;
+                                                        inhibitor.update_from_config(&combined.base).await;
                                                     }
                                                     
                                                     let app_blocking = match timeout(
@@ -182,6 +172,15 @@ pub async fn spawn_ipc_socket_with_listener(
                                             "Idle manager resumed".to_string()
                                         }
 
+                                        // === LIST ===
+                                        cmd if cmd.starts_with("list") => {
+                                            let args = cmd.strip_prefix("list").unwrap_or("").trim();
+                                            match list::handle_list_command(manager.clone(), args).await {
+                                                Ok(msg) => msg,
+                                                Err(e) => format!("ERROR: {}", e),
+                                            }
+                                        }
+
                                         // === TRIGGER ACTIONS ===
                                         cmd if cmd.starts_with("trigger ") => {
                                             let step = cmd.strip_prefix("trigger ").unwrap_or("").trim();
@@ -198,6 +197,38 @@ pub async fn spawn_ipc_socket_with_listener(
                                                 match trigger_action_by_name(manager.clone(), step).await {
                                                     Ok(action) => format!("Action '{}' triggered successfully", action),
                                                     Err(e) => format!("ERROR: {e}"),
+                                                }
+                                            }
+                                        }
+
+                                        // === PROFILES ===
+                                        cmd if cmd.starts_with("profile ") => {
+                                            let profile_arg = cmd.strip_prefix("profile ").unwrap_or("").trim();
+                                            
+                                            if profile_arg.is_empty() {
+                                                log_error_message("Profile command missing profile name");
+                                                "ERROR: No profile name provided".to_string()
+                                            } else {
+                                                let profile_name = if profile_arg.eq_ignore_ascii_case("none") {
+                                                    None
+                                                } else {
+                                                    Some(profile_arg)
+                                                };
+                                                
+                                                let mut mgr = manager.lock().await;
+                                                match mgr.set_profile(profile_name).await {
+                                                    Ok(msg) => {
+                                                        log_message(&format!(
+                                                            "Profile switched: {}",
+                                                            profile_name.unwrap_or("base config")
+                                                        ));
+                                                        mgr.trigger_instant_actions().await;
+                                                        msg
+                                                    }
+                                                    Err(e) => {
+                                                        log_error_message(&format!("Failed to set profile: {}", e));
+                                                        format!("ERROR: {}", e)
+                                                    }
                                                 }
                                             }
                                         }
@@ -261,6 +292,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         let media_blocking = mgr.state.media.media_blocking;
                                                         let media_bridge_active = mgr.state.media.media_bridge_active;
                                                         let cfg_clone = mgr.state.cfg.clone();
+                                                        let current_profile = mgr.current_profile();
                                                         
                                                         drop(mgr);
                                                         
@@ -286,23 +318,30 @@ pub async fn spawn_ipc_socket_with_listener(
                                                                 ("Active", "idle_active")
                                                             };
 
+                                                            let profile_str = if let Some(p) = current_profile {
+                                                                format!("\nProfile: {}", p)
+                                                            } else {
+                                                                "\nProfile: base config".to_string()
+                                                            };
+
                                                             serde_json::json!({
                                                                 "text": text,
                                                                 "alt": icon,
                                                                 "tooltip": format!(
-                                                                    "{}\nIdle time: {}\nUptime: {}\nPaused: {}\nManually paused: {}\nApp blocking: {}\nMedia blocking: {}",
+                                                                    "{}\nIdle time: {}\nUptime: {}\nPaused: {}\nManually paused: {}\nApp blocking: {}\nMedia blocking: {}{}",
                                                                     if idle_inhibited { "Idle inhibited" } else { "Idle active" },
                                                                     format_duration(idle_time),
                                                                     format_duration(uptime),
                                                                     paused,
                                                                     manually_inhibited,
                                                                     app_blocking,
-                                                                    media_blocking
+                                                                    media_blocking,
+                                                                    profile_str
                                                                 )
                                                             })
                                                             .to_string()
                                                         } else if let Some(cfg) = &cfg_clone {
-                                                            cfg.pretty_print(
+                                                            let mut info = cfg.pretty_print(
                                                                 Some(idle_time), 
                                                                 Some(uptime), 
                                                                 Some(idle_inhibited), 
@@ -310,7 +349,15 @@ pub async fn spawn_ipc_socket_with_listener(
                                                                 Some(app_blocking), 
                                                                 Some(media_blocking),
                                                                 Some(media_bridge_active)
-                                                            )
+                                                            );
+                                                            
+                                                            if let Some(p) = current_profile {
+                                                                info.push_str(&format!("\n\nActive profile: {}", p));
+                                                            } else {
+                                                                info.push_str("\n\nActive profile: base config");
+                                                            }
+                                                            
+                                                            info
                                                         } else {
                                                             "No configuration loaded".to_string()
                                                         };
@@ -331,13 +378,6 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         tokio::time::sleep(Duration::from_millis(20)).await;
                                                     }
                                                 }
-                                            }
-                                        }
-
-                                        "list_actions" => {
-                                            match crate::ipc::commands::list_available_actions(manager.clone()).await.as_slice() {
-                                                [] => "No actions available".to_string(),
-                                                actions => actions.join(", "),
                                             }
                                         }
 

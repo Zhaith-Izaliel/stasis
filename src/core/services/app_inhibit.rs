@@ -33,12 +33,10 @@ impl AppInhibitor {
         }
     }
 
-    /// Update the config reference when config is reloaded
     pub async fn update_from_config(&mut self, cfg: &StasisConfig) {
         self.cfg = Arc::new(cfg.clone());
     }
 
-    /// Returns true if any app in inhibit_apps is currently running
     pub async fn is_any_app_running(&mut self) -> bool {
         let mut new_active_apps = HashSet::new();
 
@@ -60,11 +58,9 @@ impl AppInhibitor {
         running
     }
 
-    /// Process-based fallback - only refresh what we need
     fn check_processes_with_tracking(&mut self, new_active_apps: &mut HashSet<String>) -> bool {
         let mut any_running = false;
 
-        // all_processes() returns Result<ProcessesIter, ProcError>
         let processes_iter = match all_processes() {
             Ok(iter) => iter,
             Err(_) => return false, // unable to read /proc
@@ -76,13 +72,11 @@ impl AppInhibitor {
                 Err(_) => continue, // skip processes that failed
             };
 
-            // Fast: just read /proc/[pid]/comm for process name
             let proc_name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
                 Ok(name) => name.trim().to_string(),
                 Err(_) => continue,
             };
 
-            // Compare against inhibit patterns
             for pattern in &self.cfg.inhibit_apps {
                 let matched = match pattern {
                     crate::config::model::AppInhibitPattern::Literal(s) => {
@@ -102,7 +96,6 @@ impl AppInhibitor {
         any_running
     }    
     
-    /// Check compositor windows via IPC
     async fn check_compositor_windows(&self) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
         match self.desktop.as_str() {
             "niri" => {
@@ -174,7 +167,6 @@ impl AppInhibitor {
         false
     }
 
-    /// Gracefully stop the inhibitor
     pub async fn shutdown(&mut self) {
         log_message("Shutting down app inhibitor...");
         self.active_apps.clear();
@@ -187,7 +179,6 @@ pub async fn spawn_app_inhibit_task(
 ) -> Arc<Mutex<AppInhibitor>> {
     let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(cfg.clone(), Arc::clone(&manager))));
 
-    // If no inhibit apps are configured, sleep forever
     if cfg.inhibit_apps.is_empty() {
         log_message("No inhibit_apps configured, sleeping app inhibitor.");
         tokio::spawn(async move {
@@ -199,7 +190,7 @@ pub async fn spawn_app_inhibit_task(
     let inhibitor_clone = Arc::clone(&inhibitor);
 
     tokio::spawn(async move {
-        let mut inhibitor_active = false; // track previous inhibitor state locally
+        let mut inhibitor_active = false;
 
         loop {
             let running = {

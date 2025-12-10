@@ -1,11 +1,12 @@
-use eyre::{Result, eyre, WrapErr};
+use eyre::{Result, WrapErr};
 use regex::Regex;
 use rune_cfg::{RuneConfig, Value};
 use std::path::PathBuf;
 
 use crate::{
-    config::model::*, core::utils::{ChassisKind, detect_chassis}, 
-    log::log_debug_message
+    config::model::*, 
+    core::utils::{ChassisKind, detect_chassis}, 
+    log::{log_debug_message, log_message},
 };
 
 fn parse_app_pattern(s: &str) -> Result<AppInhibitPattern> {
@@ -33,7 +34,7 @@ fn is_special_key(key: &str) -> bool {
             | "lid_close_action" | "lid-close-action"
             | "lid_open_action" | "lid-open-action"
             | "media_blacklist" | "media-blacklist"
-            | "lock_detection_type" | "lock-detecton-type"
+            | "lock_detection_type" | "lock-detection-type"
     )
 }
 
@@ -90,8 +91,6 @@ fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBloc
             None
         };
 
-
-
         let notification = config
             .get::<String>(&format!("{}.{}.notification", path, key))
             .ok();
@@ -111,21 +110,11 @@ fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBloc
     Ok(actions)
 }
 
-/// Load configuration with fallback chain:
-/// 1. Internal defaults (embedded from examples/)
-/// 2. Shipped examples (/usr/share/stasis/examples/stasis.rune)
-/// 3. System config (/etc/stasis/stasis.rune)
-/// 4. User config (~/.config/stasis/stasis.rune) - highest priority
-///
-/// Uses the new from_file_with_fallback API for cleaner loading
 fn load_merged_config() -> Result<RuneConfig> {
-    // 1. Try internal defaults first
     let internal_default = include_str!("../../examples/stasis.rune");
     let mut config = RuneConfig::from_str(internal_default)
         .wrap_err("failed to parse internal default config")?;
 
-    // 2. Try to load from filesystem with fallback chain
-    // Priority: user > system > shared examples
     let user_path = dirs::home_dir()
         .map(|mut p| {
             p.push(".config/stasis/stasis.rune");
@@ -135,10 +124,8 @@ fn load_merged_config() -> Result<RuneConfig> {
     let system_path = PathBuf::from("/etc/stasis/stasis.rune");
     let share_path = PathBuf::from("/usr/share/stasis/examples/stasis.rune");
 
-    // Try user config first, with system as fallback
     if let Some(user_path) = user_path {
         if user_path.exists() {
-            // User config exists, use it (may have imports)
             config = RuneConfig::from_file(&user_path)
                 .wrap_err_with(|| format!("failed to load user config from {}", user_path.display()))?;
             log_debug_message(&format!("Loaded config from: {}", user_path.display()));
@@ -146,7 +133,6 @@ fn load_merged_config() -> Result<RuneConfig> {
         }
     }
 
-    // No user config, try system with share as fallback
     if system_path.exists() {
         config = RuneConfig::from_file(&system_path)
             .wrap_err_with(|| format!("failed to load system config from {}", system_path.display()))?;
@@ -154,7 +140,6 @@ fn load_merged_config() -> Result<RuneConfig> {
         return Ok(config);
     }
 
-    // Try share path (examples) as final fallback
     if share_path.exists() {
         config = RuneConfig::from_file(&share_path)
             .wrap_err_with(|| format!("failed to load shared example config from {}", share_path.display()))?;
@@ -162,15 +147,11 @@ fn load_merged_config() -> Result<RuneConfig> {
         return Ok(config);
     }
 
-    // If no filesystem configs exist, use internal defaults
     log_debug_message("Using internal default configuration");
     Ok(config)
 }
 
-/// Main configuration loader
-pub fn load_config() -> Result<StasisConfig> {
-    let config = load_merged_config().wrap_err("failed to load configuration")?;
-
+fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
     let pre_suspend_command = config
         .get::<String>("stasis.pre_suspend_command")
         .or_else(|_| config.get::<String>("stasis.pre-suspend-command"))
@@ -186,13 +167,11 @@ pub fn load_config() -> Result<StasisConfig> {
         .or_else(|_| config.get::<bool>("stasis.ignore-remote-media"))
         .unwrap_or(true);
 
-    // Use Vec<String> conversion directly
     let media_blacklist: Vec<String> = config
         .get("stasis.media_blacklist")
         .or_else(|_| config.get("stasis.media-blacklist"))
         .unwrap_or_default();
     
-    // Convert to lowercase after extraction
     let media_blacklist: Vec<String> = media_blacklist
         .into_iter()
         .map(|s| s.to_lowercase())
@@ -254,9 +233,8 @@ pub fn load_config() -> Result<StasisConfig> {
             "logind" => LockDetectionType::Logind,
             _ => LockDetectionType::Process,
         })
-        .unwrap_or(LockDetectionType::Process); // Default to Process
+        .unwrap_or(LockDetectionType::Process);
 
-    // Use Vec conversion with custom pattern parsing
     let inhibit_apps: Vec<AppInhibitPattern> = config
         .get_value("stasis.inhibit_apps")
         .or_else(|_| config.get_value("stasis.inhibit-apps"))
@@ -280,8 +258,7 @@ pub fn load_config() -> Result<StasisConfig> {
         ChassisKind::Laptop => {
             let mut all = Vec::new();
             
-            // Collect with "ac." prefix
-            let ac_actions = collect_actions(&config, "stasis.on_ac")?
+            let ac_actions = collect_actions(config, "stasis.on_ac")?
                 .into_iter()
                 .map(|mut a| {
                     a.name = format!("ac.{}", a.name);
@@ -289,8 +266,7 @@ pub fn load_config() -> Result<StasisConfig> {
                 });
             all.extend(ac_actions);
             
-            // Collect with "battery." prefix
-            let battery_actions = collect_actions(&config, "stasis.on_battery")?
+            let battery_actions = collect_actions(config, "stasis.on_battery")?
                 .into_iter()
                 .map(|mut a| {
                     a.name = format!("battery.{}", a.name);
@@ -300,11 +276,13 @@ pub fn load_config() -> Result<StasisConfig> {
             
             all
         }
-        ChassisKind::Desktop => collect_actions(&config, "stasis")?,
+        ChassisKind::Desktop => collect_actions(config, "stasis")?,
     };
-
+  
     if actions.is_empty() {
-        return Err(eyre!("no valid idle actions found in config"));
+        // don't fail — load an empty action list and let the runtime decide what to do
+        log_message("No valid idle actions found in base config; continuing with empty actions.");
+        // optionally: return Err if you want to force at least one action in some modes
     }
 
     log_debug_message("Parsed Config:");
@@ -346,8 +324,7 @@ pub fn load_config() -> Result<StasisConfig> {
         log_debug_message(&details);
     }
 
-    // Reorder actions: instants first, then the rest, keeping relative order
-    let mut actions = actions; // make mutable if not already
+    let mut actions = actions;
     actions.sort_by_key(|a| a.timeout != 0);
 
     Ok(StasisConfig {
@@ -365,5 +342,181 @@ pub fn load_config() -> Result<StasisConfig> {
         notify_before_action,
         notify_seconds_before,
         lock_detection_type,
+    })
+}
+
+fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConfig) -> Result<Profile> {
+    let base_path = format!("profiles.{}", profile_name);
+
+    // Actions
+    let actions = collect_actions(config, &base_path)?;
+    if actions.is_empty() {
+        log_debug_message(&format!("Profile '{}' defines no actions; proceeding with empty actions.", profile_name));
+    }
+
+    // Primitive fields: fallback to 'empty' values if undefined
+    let debounce_seconds = config
+        .get::<u8>(&format!("{}.debounce_seconds", base_path))
+        .or_else(|_| config.get::<u8>(&format!("{}.debounce-seconds", base_path)))
+        .unwrap_or(0);
+
+    let monitor_media = config
+        .get::<bool>(&format!("{}.monitor_media", base_path))
+        .or_else(|_| config.get::<bool>(&format!("{}.monitor-media", base_path)))
+        .unwrap_or(false);
+
+    let ignore_remote_media = config
+        .get::<bool>(&format!("{}.ignore_remote_media", base_path))
+        .or_else(|_| config.get::<bool>(&format!("{}.ignore-remote-media", base_path)))
+        .unwrap_or(false);
+ 
+    let media_blacklist: Vec<String> = config
+        .get::<Vec<String>>(&format!("{}.media_blacklist", base_path))
+        .or_else(|_| config.get::<Vec<String>>(&format!("{}.media-blacklist", base_path)))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    let respect_wayland_inhibitors = config
+        .get::<bool>(&format!("{}.respect_wayland_inhibitors", base_path))
+        .or_else(|_| config.get::<bool>(&format!("{}.respect-wayland-inhibitors", base_path)))
+        .unwrap_or(false);
+    
+    let pre_suspend_command = config
+        .get::<String>(&format!("{}.pre_suspend_command", base_path))
+        .or_else(|_| config.get::<String>(&format!("{}.pre-suspend-command", base_path)))
+        .ok();
+
+    let notify_on_unpause = config
+        .get::<bool>(&format!("{}.notify_on_unpause", base_path))
+        .or_else(|_| config.get::<bool>(&format!("{}.notify-on-unpause", base_path)))
+        .unwrap_or(false);
+
+    let notify_before_action = config
+        .get::<bool>(&format!("{}.notify_before_action", base_path))
+        .or_else(|_| config.get::<bool>(&format!("{}.notify-before-action", base_path)))
+        .unwrap_or(false);
+
+    let notify_seconds_before = config
+        .get::<u64>(&format!("{}.notify_seconds_before", base_path))
+        .or_else(|_| config.get::<u64>(&format!("{}.notify-seconds-before", base_path)))
+        .unwrap_or(0);
+
+    let lid_close_action = config
+        .get::<String>(&format!("{}.lid_close_action", base_path))
+        .or_else(|_| config.get::<String>(&format!("{}.lid-close-action", base_path)))
+        .ok()
+        .map(|s| match s.trim() {
+            "ignore" => LidCloseAction::Ignore,
+            "lock_screen" | "lock-screen" => LidCloseAction::LockScreen,
+            "suspend" => LidCloseAction::Suspend,
+            other => LidCloseAction::Custom(other.to_string()),
+        })
+        .unwrap_or(LidCloseAction::Ignore);
+
+    let lid_open_action = config
+        .get::<String>(&format!("{}.lid_open_action", base_path))
+        .or_else(|_| config.get::<String>(&format!("{}.lid-open-action", base_path)))
+        .ok()
+        .map(|s| match s.trim() {
+            "ignore" => LidOpenAction::Ignore,
+            "wake" => LidOpenAction::Wake,
+            other => LidOpenAction::Custom(other.to_string()),
+        })
+        .unwrap_or(LidOpenAction::Ignore);
+
+    let lock_detection_type = config
+        .get::<String>(&format!("{}.lock_detection_type", base_path))
+        .or_else(|_| config.get::<String>(&format!("{}.lock-detection-type", base_path)))
+        .ok()
+        .map(|s| match s.trim().to_lowercase().as_str() {
+            "logind" => LockDetectionType::Logind,
+            _ => LockDetectionType::Process,
+        })
+        .unwrap_or(LockDetectionType::Process);
+
+    let inhibit_apps: Vec<AppInhibitPattern> = config
+        .get_value(&format!("{}.inhibit_apps", base_path))
+        .or_else(|_| config.get_value(&format!("{}.inhibit-apps", base_path)))
+        .ok()
+        .and_then(|v| match v {
+            Value::Array(arr) => Some(
+                arr.iter()
+                    .filter_map(|v| match v {
+                        Value::String(s) => parse_app_pattern(s).ok(),
+                        Value::Regex(s) => Regex::new(s).ok().map(AppInhibitPattern::Regex),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    Ok(Profile {
+        name: profile_name.to_string(),
+        actions,
+        debounce_seconds,
+        inhibit_apps,
+        monitor_media,
+        ignore_remote_media,
+        media_blacklist,
+        pre_suspend_command,
+        respect_wayland_inhibitors,
+        lid_close_action,
+        lid_open_action,
+        notify_on_unpause,
+        notify_before_action,
+        notify_seconds_before,
+        lock_detection_type,
+    })
+}
+
+fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Profile>> {
+    let profile_keys = config
+        .get_keys("profiles")
+        .unwrap_or_default();
+
+    let mut profiles = Vec::new();
+    
+    for profile_name in profile_keys {
+        if is_special_key(&profile_name) {
+            continue;
+        }
+        
+        match parse_profile(config, &profile_name, base) {
+            Ok(profile) => {
+                log_debug_message(&format!("Loaded profile: {}", profile_name));
+                profiles.push(profile);
+            }
+            Err(e) => {
+                log_debug_message(&format!("Failed to load profile '{}': {}", profile_name, e));
+            }
+        }
+    }
+
+    Ok(profiles)
+}
+
+pub fn load_config() -> Result<StasisConfig> {
+    let config = load_merged_config().wrap_err("failed to load configuration")?;
+    parse_base_stasis_config(&config)
+}
+
+pub fn load_combined_config() -> Result<CombinedConfig> {
+    let config = load_merged_config().wrap_err("failed to load configuration")?;
+    let base = parse_base_stasis_config(&config)?;
+    let profiles = load_profiles(&config, &base)?;
+    
+    if !profiles.is_empty() {
+        let profile_names: Vec<_> = profiles.iter().map(|p| p.name.as_str()).collect();
+        log_debug_message(&format!("  profiles: {}", profile_names.join(", ")));
+    }
+    
+    Ok(CombinedConfig {
+        base,
+        profiles,
+        active_profile: None,
     })
 }

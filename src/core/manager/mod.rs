@@ -15,7 +15,7 @@ use tokio::{
 
 pub use self::state::ManagerState;
 use crate::{
-    config::model::{IdleAction, StasisConfig}, 
+    config::model::{IdleAction, StasisConfig, CombinedConfig}, 
     core::manager::{
         actions::run_action,
         brightness::restore_brightness,
@@ -35,6 +35,13 @@ impl Manager {
         Self {
             state: ManagerState::new(cfg),
             tasks: TaskManager::new(), 
+        }
+    }
+
+    pub fn new_with_profiles(combined: &CombinedConfig) -> Self {
+        Self {
+            state: ManagerState::new_with_profiles(combined),
+            tasks: TaskManager::new(),
         }
     }
 
@@ -528,6 +535,77 @@ impl Manager {
 
         min_time
     }
+
+    pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
+        let profile_name_opt = profile_name.map(|s| s.to_string());
+        
+        // Check if profile exists (if not "none")
+        if let Some(name) = &profile_name_opt {
+            if !self.state.profile.has_profile(name) {
+                return Err(format!("Profile '{}' not found", name));
+            }
+        }
+        
+        // Get the profile or fall back to base config
+        let config_to_apply = if let Some(name) = &profile_name_opt {
+            let profile = self.state.profile.get_profile(name)
+                .ok_or_else(|| format!("Profile '{}' not found", name))?;
+            
+            // Convert profile to StasisConfig
+            self.profile_to_stasis_config(profile)
+        } else {
+            // Use base config - need to reload from file
+            match crate::config::parser::load_combined_config() {
+                Ok(combined) => combined.base,
+                Err(e) => return Err(format!("Failed to load base config: {}", e)),
+            }
+        };
+        
+        // Apply the config
+        self.state.update_from_config(&config_to_apply).await;
+        
+        // Update active profile tracking
+        self.state.profile.set_active(profile_name_opt.clone());
+        
+        // Return success message
+        Ok(if let Some(name) = profile_name_opt {
+            format!("Switched to profile: {}", name)
+        } else {
+            "Switched to base configuration".to_string()
+        })
+    }
+    
+    /// Convert a Profile to StasisConfig
+    fn profile_to_stasis_config(&self, profile: &crate::config::model::Profile) -> StasisConfig {
+        
+        StasisConfig {
+            actions: profile.actions.clone(),
+            debounce_seconds: profile.debounce_seconds,
+            inhibit_apps: profile.inhibit_apps.clone(),
+            monitor_media: profile.monitor_media,
+            ignore_remote_media: profile.ignore_remote_media,
+            media_blacklist: profile.media_blacklist.clone(),
+            pre_suspend_command: profile.pre_suspend_command.clone(),
+            respect_wayland_inhibitors: profile.respect_wayland_inhibitors.clone(),
+            lid_close_action: profile.lid_close_action.clone(),
+            lid_open_action: profile.lid_open_action.clone(),
+            notify_on_unpause: profile.notify_on_unpause,
+            notify_before_action: profile.notify_before_action,
+            notify_seconds_before: profile.notify_seconds_before,
+            lock_detection_type: profile.lock_detection_type.clone(),
+        }
+    }
+    
+    /// List available profile names
+    pub fn list_profiles(&self) -> Vec<String> {
+        self.state.profile.profile_names()
+    }
+    
+    /// Get current profile name (None if using base)
+    pub fn current_profile(&self) -> Option<String> {
+        self.state.profile.active_profile.clone()
+    }
+
 
     pub async fn pause(&mut self, manual: bool) {
         if manual {

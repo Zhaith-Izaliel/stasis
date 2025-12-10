@@ -27,7 +27,7 @@ pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl Future<Output = ()>
                 )
             };
 
-            // Compute how long we should sleep using tokio Instant (no drift)
+            // Compute how long we should sleep using tokio Instant
             let now = TokioInstant::now();
             let sleep_deadline = match next_instant {
                 Some(next_std) => {
@@ -166,7 +166,6 @@ pub fn spawn_lock_watcher(
                     mgr.state.actions.action_index = 0;
                     mgr.state.lock.is_locked = false;
 
-                    // Fire all pre-lock resume commands on unlock
                     mgr.fire_pre_lock_resume_queue().await;
 
                     mgr.reset().await;

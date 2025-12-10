@@ -2,7 +2,8 @@ use super::{IdleActionBlock, AppInhibitPattern, LidCloseAction, LidOpenAction};
 use super::LockDetectionType;
 
 #[derive(Debug, Clone)]
-pub struct StasisConfig {
+pub struct Profile {
+    pub name: String,
     pub actions: Vec<IdleActionBlock>,
     pub debounce_seconds: u8,
     pub inhibit_apps: Vec<AppInhibitPattern>,
@@ -17,11 +18,4 @@ pub struct StasisConfig {
     pub notify_before_action: bool,
     pub notify_seconds_before: u64,
     pub lock_detection_type: LockDetectionType,
-}
-
-#[derive(Debug, Clone)]
-pub struct CombinedConfig {
-    pub base: StasisConfig,
-    pub profiles: Vec<super::Profile>,
-    pub active_profile: Option<String>,
 }

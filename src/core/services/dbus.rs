@@ -116,15 +116,12 @@ pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRe
         "org.freedesktop.login1.Session"
     ).await?;
     
-    // Listen for Lock signal
     let mut lock_stream = proxy.receive_signal("Lock").await?;
     let manager_for_lock = Arc::clone(&idle_manager);
     
-    // Listen for Unlock signal
     let mut unlock_stream = proxy.receive_signal("Unlock").await?;
     let manager_for_unlock = Arc::clone(&idle_manager);
     
-    // Spawn task for Lock signals
     let lock_task = tokio::spawn(async move {
         while let Some(_signal) = lock_stream.next().await {
             log_dbus_message("Received Lock signal from loginctl");
@@ -132,7 +129,6 @@ pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRe
         }
     });
     
-    // Spawn task for Unlock signals
     let unlock_task = tokio::spawn(async move {
         while let Some(_signal) = unlock_stream.next().await {
             log_dbus_message("Received Unlock signal from loginctl");

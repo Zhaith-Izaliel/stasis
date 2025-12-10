@@ -8,7 +8,7 @@ use tokio::{
 };
 
 use crate::{
-    config::parser::load_config,
+    config::parser::load_combined_config,
     core::{
         manager::{idle_loops::{spawn_idle_task, spawn_lock_watcher}, Manager},
         services::{
@@ -34,8 +34,9 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
         crate::log::set_verbose(true);
     }
     
-    let cfg = Arc::new(load_config()?);
-    let manager = Manager::new(Arc::clone(&cfg));
+    let combined_cfg = load_combined_config()?; 
+    let cfg = Arc::new(combined_cfg.base.clone());
+    let manager = Manager::new_with_profiles(&combined_cfg);
     let manager = Arc::new(Mutex::new(manager));
 
     // Spawn internal background tasks

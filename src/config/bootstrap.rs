@@ -6,20 +6,16 @@ pub fn ensure_user_config_exists() -> std::io::Result<()> {
     if let Some(mut path) = dirs::home_dir() {
         path.push(".config/stasis");
         
-        // Create directory if missing
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
         
-        // Append file name
         path.push("stasis.rune");
         
-        // If file exists, do nothing
         if path.exists() {
             return Ok(());
         }
         
-        // Otherwise, generate initial config
         let contents = generate_default_config();
         fs::write(&path, contents)?;
         log_message(&format!("Stasis: Default config created at {:?}", path));

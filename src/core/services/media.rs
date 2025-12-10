@@ -217,18 +217,13 @@ pub fn check_media_playing(
             return true;
         }
         
-        // For non-local players:
         if ignore_remote_media {
-            // User wants to skip remote media:
-            // we only accept this player if it has a real local sink-input.
             if is_player_local_by_pactl(&identity) {
                 return true;
             } else {
-                // It's remote → ignore it
                 continue;
             }
         } else {
-            // Not ignoring remote → treat as real media
             return true;
         }
     }
@@ -268,7 +263,7 @@ fn is_player_local_by_pactl(player_name: &str) -> bool {
         .output()
     {
         Ok(o) => o,
-        Err(_) => return false, // pactl failed → assume not local
+        Err(_) => return false,
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();

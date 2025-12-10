@@ -123,7 +123,6 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                     }
                 }
 
-                // Only trigger reset if we had actual input
                 if has_real_input {
                     let now = Instant::now();
                     if now.duration_since(last_reset) >= DEBOUNCE {
