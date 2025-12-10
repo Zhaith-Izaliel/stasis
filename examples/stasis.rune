@@ -166,3 +166,51 @@ stasis:
     end
   end
 end
+
+
+profiles:
+  work:
+    monitor_media true
+    ignore_remote_media true
+    respect_idle_inhibitors true
+
+    lock_screen:
+      timeout 600        # 10 minutes
+      command "loginctl lock-session"
+      resume-command "notify-send 'Welcome back, $env.USER!'"
+      lock-command "swaylock"
+    end
+
+    dpms:
+      timeout 300        # 5 minutes
+      command "niri msg action power-off-monitors"
+      resume-command "niri msg action power-on-monitors"
+    end
+
+    suspend:
+      timeout 3600       # 1 hour
+      command "systemctl suspend"
+    end
+  end
+
+  gaming:
+    inhibit_apps [
+      "steam"
+      r"steam_app_.*"
+      "gamescope"
+    ]
+  end
+
+  presentation:
+    # For teaching, meetings, talks
+    respect_idle_inhibitors false # Ignore Wayland inhibitors during presentations
+
+    # Leave everything else undefined to keep the machine awake
+
+    brightness:
+      timeout 0
+      command "brightnessctl set 100%"
+    end
+  end
+
+end
