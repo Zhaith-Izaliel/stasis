@@ -486,10 +486,7 @@ fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Profile
         }
         
         match parse_profile(config, &profile_name, base) {
-            Ok(profile) => {
-                log_debug_message(&format!("Loaded profile: {}", profile_name));
-                profiles.push(profile);
-            }
+            Ok(profile) => profiles.push(profile),
             Err(e) => {
                 log_debug_message(&format!("Failed to load profile '{}': {}", profile_name, e));
             }
@@ -511,7 +508,7 @@ pub fn load_combined_config() -> Result<CombinedConfig> {
     
     if !profiles.is_empty() {
         let profile_names: Vec<_> = profiles.iter().map(|p| p.name.as_str()).collect();
-        log_debug_message(&format!("  profiles: {}", profile_names.join(", ")));
+        log_message(&format!("  profiles: {}", profile_names.join(", ")));
     }
     
     Ok(CombinedConfig {

@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::{
     config, core::{
-        manager::{helpers::{set_manually_paused, trigger_all_idle_actions}, Manager}, 
+        manager::{helpers::{set_manually_paused, trigger_all_idle_actions, current_profile}, Manager}, 
         services::app_inhibit::AppInhibitor,
         utils::format_duration,
     }, 
@@ -284,7 +284,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                             
                                             loop {
                                                 match manager.try_lock() {
-                                                    Ok(mgr) => {
+                                                    Ok(mut mgr) => {
                                                         let idle_time = mgr.state.timing.last_activity.elapsed();
                                                         let uptime = mgr.state.timing.start_time.elapsed();
                                                         let manually_inhibited = mgr.state.inhibitors.manually_paused;
@@ -292,7 +292,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         let media_blocking = mgr.state.media.media_blocking;
                                                         let media_bridge_active = mgr.state.media.media_bridge_active;
                                                         let cfg_clone = mgr.state.cfg.clone();
-                                                        let current_profile = mgr.current_profile();
+                                                        let current_profile = current_profile(&mut mgr);
                                                         
                                                         drop(mgr);
                                                         

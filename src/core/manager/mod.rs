@@ -5,6 +5,7 @@ pub mod idle_loops;
 pub mod inhibitors;
 pub mod media;
 pub mod processes;
+pub mod resume;
 pub mod state;
 pub mod tasks;
 
@@ -19,6 +20,7 @@ use crate::{
     core::manager::{
         actions::run_action,
         brightness::restore_brightness,
+        helpers::{profile_to_stasis_config, has_lock_action, get_lock_index},
         processes::{is_process_running, run_command_detached},
         tasks::TaskManager,
     }, 
@@ -78,16 +80,6 @@ impl Manager {
     pub fn reset_instant_actions(&mut self) {
         self.state.actions.instants_triggered = false;
         log_debug_message("Instant actions reset; they can trigger again");
-    }
-
-    pub fn has_lock_action(&self) -> bool {
-        let actions = self.state.get_active_actions();
-        actions.iter().any(|a| matches!(a.kind, IdleAction::LockScreen))
-    }
-    
-    pub fn get_lock_index(&self) -> Option<usize> {
-        let actions = self.state.get_active_actions();
-        actions.iter().position(|a| matches!(a.kind, IdleAction::LockScreen))
     }
 
     // Check if any actions have surpassed their timeout period
@@ -179,8 +171,8 @@ impl Manager {
 
         // Determine which queue to add resume command to
         if action_clone.resume_command.is_some() {
-            let has_lock = self.has_lock_action();
-            let lock_index = self.get_lock_index();
+            let has_lock = has_lock_action(self);
+            let lock_index = get_lock_index(self);
             
             if !matches!(action_clone.kind, IdleAction::LockScreen) {
                 if has_lock {
@@ -341,123 +333,6 @@ impl Manager {
         self.state.notify.notify_one();
     }
 
-    // New method: fire only pre-lock resume commands (on unlock)
-    pub async fn fire_pre_lock_resume_queue(&mut self) {
-        if self.state.actions.pre_lock_resume_queue.is_empty() {
-            return;
-        }
-
-        log_message(&format!(
-            "Firing {} pre-lock resume command(s) on unlock...", 
-            self.state.actions.pre_lock_resume_queue.len()
-        ));
-
-        for action in self.state.actions.pre_lock_resume_queue.drain(..) {
-            if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running pre-lock resume command for action: {}", action.name));
-                if let Err(e) = run_command_detached(resume_cmd).await {
-                    log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
-                }
-            }
-        }
-
-        self.state.actions.pre_lock_resume_queue.clear();
-    }
-
-    // New method: fire post-lock resume commands (while locked)
-    pub async fn fire_post_lock_resume_queue(&mut self) {
-        if self.state.actions.post_lock_resume_queue.is_empty() {
-            return;
-        }
-
-        log_message(&format!(
-            "Firing {} post-lock resume command(s) while locked...", 
-            self.state.actions.post_lock_resume_queue.len()
-        ));
-
-        let actions_to_fire: Vec<_> = self.state.actions.post_lock_resume_queue.drain(..).collect();
-        for action in actions_to_fire.into_iter().rev() {
-            if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running resume command for action: {}", action.name));
-                if let Err(e) = run_command_detached(resume_cmd).await {
-                    log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
-                }
-                
-                // If this was a DPMS action, remove it from pre-lock queue since we just fired it
-                if matches!(action.kind, IdleAction::Dpms) {
-                    self.state.actions.pre_lock_resume_queue.retain(|a| {
-                        !matches!(a.kind, IdleAction::Dpms) || a.name != action.name
-                    });
-                    log_debug_message(&format!("DPMS resume fired post-lock, removed from pre-lock queue: {}", action.name));
-                }
-            }
-        }
-
-        self.state.actions.post_lock_resume_queue.clear();
-    }
-
-    // New method: fire all resume commands (on unlock or if no lock)
-    pub async fn fire_all_resume_queues(&mut self) {
-        // Calculate the actual number of commands that will fire
-        // (accounting for DPMS actions that appear in both queues)
-        let mut actual_count = self.state.actions.post_lock_resume_queue.len();
-        let dpms_names_in_post: Vec<String> = self.state.actions.post_lock_resume_queue
-            .iter()
-            .filter(|a| matches!(a.kind, IdleAction::Dpms))
-            .map(|a| a.name.clone())
-            .collect();
-        
-        // Count pre-lock actions, but skip DPMS actions that are already in post-lock
-        for action in &self.state.actions.pre_lock_resume_queue {
-            if matches!(action.kind, IdleAction::Dpms) && dpms_names_in_post.contains(&action.name) {
-                continue; // Don't count this one, it's a duplicate
-            }
-            actual_count += 1;
-        }
-            
-        if actual_count == 0 {
-            return;
-        }
-
-        log_message(&format!("Firing {} total resume command(s)...", actual_count));
-
-        // Fire post-lock commands first and track which DPMS actions we fire
-        let mut fired_dpms_names: Vec<String> = Vec::new();
-        
-        for action in self.state.actions.post_lock_resume_queue.drain(..) {
-            if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running post-lock resume command for action: {}", action.name));
-                if let Err(e) = run_command_detached(resume_cmd).await {
-                    log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
-                }
-                
-                // Track DPMS actions we've fired
-                if matches!(action.kind, IdleAction::Dpms) {
-                    fired_dpms_names.push(action.name.clone());
-                }
-            }
-        }
-
-        // Fire pre-lock commands, but skip any DPMS actions we already fired
-        for action in self.state.actions.pre_lock_resume_queue.drain(..) {
-            // Skip DPMS actions that were already fired from post-lock queue
-            if matches!(action.kind, IdleAction::Dpms) && fired_dpms_names.contains(&action.name) {
-                log_debug_message(&format!("Skipping duplicate DPMS resume for: {}", action.name));
-                continue;
-            }
-            
-            if let Some(resume_cmd) = &action.resume_command {
-                log_message(&format!("Running pre-lock resume command for action: {}", action.name));
-                if let Err(e) = run_command_detached(resume_cmd).await {
-                    log_message(&format!("Failed to run resume command '{}': {}", resume_cmd, e));
-                }
-            }
-        }
-
-        self.state.actions.pre_lock_resume_queue.clear();
-        self.state.actions.post_lock_resume_queue.clear();
-    }
-
     pub fn next_action_instant(&self) -> Option<Instant> {
         if self.state.inhibitors.paused || self.state.inhibitors.manually_paused {
             return None;
@@ -534,7 +409,7 @@ impl Manager {
         }
 
         min_time
-    }
+    } 
 
     pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
         let profile_name_opt = profile_name.map(|s| s.to_string());
@@ -552,7 +427,7 @@ impl Manager {
                 .ok_or_else(|| format!("Profile '{}' not found", name))?;
             
             // Convert profile to StasisConfig
-            self.profile_to_stasis_config(profile)
+            profile_to_stasis_config(profile)
         } else {
             // Use base config - need to reload from file
             match crate::config::parser::load_combined_config() {
@@ -575,38 +450,6 @@ impl Manager {
         })
     }
     
-    /// Convert a Profile to StasisConfig
-    fn profile_to_stasis_config(&self, profile: &crate::config::model::Profile) -> StasisConfig {
-        
-        StasisConfig {
-            actions: profile.actions.clone(),
-            debounce_seconds: profile.debounce_seconds,
-            inhibit_apps: profile.inhibit_apps.clone(),
-            monitor_media: profile.monitor_media,
-            ignore_remote_media: profile.ignore_remote_media,
-            media_blacklist: profile.media_blacklist.clone(),
-            pre_suspend_command: profile.pre_suspend_command.clone(),
-            respect_wayland_inhibitors: profile.respect_wayland_inhibitors.clone(),
-            lid_close_action: profile.lid_close_action.clone(),
-            lid_open_action: profile.lid_open_action.clone(),
-            notify_on_unpause: profile.notify_on_unpause,
-            notify_before_action: profile.notify_before_action,
-            notify_seconds_before: profile.notify_seconds_before,
-            lock_detection_type: profile.lock_detection_type.clone(),
-        }
-    }
-    
-    /// List available profile names
-    pub fn list_profiles(&self) -> Vec<String> {
-        self.state.profile.profile_names()
-    }
-    
-    /// Get current profile name (None if using base)
-    pub fn current_profile(&self) -> Option<String> {
-        self.state.profile.active_profile.clone()
-    }
-
-
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.inhibitors.manually_paused = true;

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::core::manager::Manager;
+use crate::core::manager::helpers::{current_profile, list_profiles};
 
 pub const LIST_HELP_MESSAGE: &str = r#"List various items in Stasis
 
@@ -51,14 +52,14 @@ async fn handle_list_actions(manager: Arc<Mutex<Manager>>) -> Result<String, Str
 }
 
 async fn handle_list_profiles(manager: Arc<Mutex<Manager>>) -> Result<String, String> {
-    let mgr = manager.lock().await;
-    let profiles = mgr.list_profiles();
+    let mut mgr = manager.lock().await;
+    let profiles = list_profiles(&mut mgr);
     
     if profiles.is_empty() {
         return Ok("No profiles defined".to_string());
     }
     
-    let current = mgr.current_profile();
+    let current = current_profile(&mut mgr);
     let mut response = String::from("Available profiles:\n");
     
     for profile_name in profiles {

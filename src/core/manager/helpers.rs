@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 use crate::{
-    config::model::{IdleActionBlock, StasisConfig}, 
+    config::model::{IdleActionBlock, StasisConfig, IdleAction}, 
     core::manager::{
         actions::run_action,
         processes::{is_process_active, is_process_running, run_command_silent},
@@ -167,13 +167,28 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
     }
 }
 
+pub fn has_lock_action(mgr: &mut Manager) -> bool {
+    let actions = mgr.state.get_active_actions();
+    actions.iter().any(|a| matches!(a.kind, IdleAction::LockScreen))
+}
 
-pub fn profile_to_stasis_config(mgr: &mut Manager, profile: &crate::config::model::Profile) -> StasisConfig {
-    // Get the base config for respect_wayland_inhibitors (not in Profile)
-    let respect_wayland_inhibitors = mgr.state.cfg
-        .as_ref()
-        .map(|c| c.respect_wayland_inhibitors)
-        .unwrap_or(true);
+pub fn get_lock_index(mgr: &mut Manager) -> Option<usize> {
+    let actions = mgr.state.get_active_actions();
+    actions.iter().position(|a| matches!(a.kind, IdleAction::LockScreen))
+}
+
+/// List available profile names
+pub fn list_profiles(mgr: &mut Manager) -> Vec<String> {
+    mgr.state.profile.profile_names()
+}
+
+
+/// Get current profile name (None if using base)
+pub fn current_profile(mgr: &mut Manager) -> Option<String> {
+    mgr.state.profile.active_profile.clone()
+}
+
+pub fn profile_to_stasis_config(profile: &crate::config::model::Profile) -> StasisConfig {
     
     StasisConfig {
         actions: profile.actions.clone(),
@@ -183,7 +198,7 @@ pub fn profile_to_stasis_config(mgr: &mut Manager, profile: &crate::config::mode
         ignore_remote_media: profile.ignore_remote_media,
         media_blacklist: profile.media_blacklist.clone(),
         pre_suspend_command: profile.pre_suspend_command.clone(),
-        respect_wayland_inhibitors,
+        respect_wayland_inhibitors: profile.respect_wayland_inhibitors.clone(),
         lid_close_action: profile.lid_close_action.clone(),
         lid_open_action: profile.lid_open_action.clone(),
         notify_on_unpause: profile.notify_on_unpause,
@@ -192,3 +207,4 @@ pub fn profile_to_stasis_config(mgr: &mut Manager, profile: &crate::config::mode
         lock_detection_type: profile.lock_detection_type.clone(),
     }
 }
+
