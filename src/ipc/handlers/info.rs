@@ -38,7 +38,8 @@ pub async fn handle_info(
                         serde_json::json!({
                             "text": "",
                             "alt": "not_running",
-                            "tooltip": "Busy, try again"
+                            "tooltip": "Busy, try again",
+                            "profile": null
                         }).to_string()
                     } else {
                         "Manager is busy, try again".to_string()
@@ -95,17 +96,14 @@ fn format_json_response(state: &StateSnapshot, app_blocking: bool) -> String {
         ("Active", "idle_active")
     };
     
-    let profile_str = if let Some(p) = &state.profile {
-        format!("\nProfile: {}", p)
-    } else {
-        "\nProfile: base config".to_string()
-    };
+    // Format profile for display
+    let profile_display = state.profile.as_deref().unwrap_or("base");
     
     serde_json::json!({
         "text": text,
         "alt": icon,
         "tooltip": format!(
-            "{}\nIdle time: {}\nUptime: {}\nPaused: {}\nManually paused: {}\nApp blocking: {}\nMedia blocking: {}{}",
+            "{}\nIdle time: {}\nUptime: {}\nPaused: {}\nManually paused: {}\nApp blocking: {}\nMedia blocking: {}\nProfile: {}",
             if idle_inhibited { "Idle inhibited" } else { "Idle active" },
             format_duration(state.idle_time),
             format_duration(state.uptime),
@@ -113,8 +111,18 @@ fn format_json_response(state: &StateSnapshot, app_blocking: bool) -> String {
             state.manually_inhibited,
             app_blocking,
             state.media_blocking,
-            profile_str
-        )
+            profile_display
+        ),
+        // Add profile as separate field for easy Waybar access
+        "profile": state.profile.as_deref().unwrap_or("base"),
+        // Add other useful fields for Waybar
+        "idle_time_secs": state.idle_time.as_secs(),
+        "uptime_secs": state.uptime.as_secs(),
+        "paused": state.paused,
+        "manually_inhibited": state.manually_inhibited,
+        "app_blocking": app_blocking,
+        "media_blocking": state.media_blocking,
+        "idle_inhibited": idle_inhibited
     })
     .to_string()
 }
