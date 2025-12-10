@@ -8,29 +8,29 @@ use tokio::{
 };
 
 use crate::{
-    config::parser::load_combined_config,
-    core::{
-        manager::{idle_loops::{spawn_idle_task, spawn_lock_watcher}, Manager},
+    SOCKET_PATH, config::parser::load_combined_config, core::{
+        manager::{Manager, idle_loops::{spawn_idle_task, spawn_lock_watcher}},
         services::{
-            app_inhibit::{AppInhibitor, spawn_app_inhibit_task},
-            dbus::listen_for_power_events,
-            input::spawn_input_task,
-            media::spawn_media_monitor_dbus,
-            browser_media::spawn_browser_bridge_detector,
-            power_detection::{detect_initial_power_state, spawn_power_source_monitor},
-            wayland::setup as setup_wayland,
+            app_inhibit::{AppInhibitor, spawn_app_inhibit_task}, 
+            browser_media::spawn_browser_bridge_detector, 
+            dbus::listen_for_power_events, 
+            input::spawn_input_task, 
+            media::spawn_media_monitor_dbus, 
+            power_detection::{detect_initial_power_state, spawn_power_source_monitor}, 
+            wayland::setup as setup_wayland
         }
-    },
-    log::{log_error_message, log_message},
-    ipc,
-    SOCKET_PATH,
+    }, 
+    
+    ipc, 
+    sinfo, 
+    serror
 };
 
 /// Spawn the daemon with all its background services
 pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     // Load config
     if verbose {
-        log_message("Verbose mode enabled");
+        sinfo!("Stasis", "Verbose mode enabled");
         crate::log::set_verbose(true);
     }
     
@@ -51,7 +51,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     let dbus_manager = Arc::clone(&manager);
     tokio::spawn(async move {
         if let Err(e) = listen_for_power_events(dbus_manager).await {
-            log_error_message(&format!("D-Bus suspend event listener failed: {}", e));
+            serror!("D-Bus", "suspend event listener failed {}", e);
         }
     });
 
@@ -80,7 +80,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     if cfg.monitor_media {
         // MPRIS monitor (handles all non-Firefox players, or Firefox when bridge is unavailable)
         if let Err(e) = spawn_media_monitor_dbus(Arc::clone(&manager)).await {
-            log_error_message(&format!("Failed to spawn MPRIS media monitor: {}", e));
+            serror!("MPRIS", "Failed to spawn media monitor: {}", e);
         }
         
         // Browser bridge detector (monitors for Firefox bridge and spawns dedicated monitor)
@@ -110,7 +110,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     ).await;
     
     // Log startup message
-    log_message(&format!("Stasis started. Idle actions loaded: {}", cfg.actions.len()));
+    sinfo!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len());
     
     // Run main async tasks
     let local = LocalSet::new();
@@ -136,13 +136,13 @@ async fn setup_shutdown_handler(
         async move {
             tokio::select! {
                 _ = sigint.recv() => {
-                    log_message("Received SIGINT, shutting down...");
+                    sinfo!("Stasis", "Received SIGINT, shutting down...");
                 },
                 _ = sigterm.recv() => {
-                    log_message("Received SIGTERM, shutting down...");
+                    sinfo!("Stasis", "Received SIGTERM, shutting down...");
                 },
                 _ = sighup.recv() => {
-                    log_message("Received SIGHUP, shutting down...");
+                    sinfo!("Stasis", "Received SIGHUB, shutting down...");
                 },
             }
 
@@ -153,7 +153,7 @@ async fn setup_shutdown_handler(
             app_inhibitor.lock().await.shutdown().await;
 
             let _ = std::fs::remove_file(SOCKET_PATH);
-            log_message("Shutdown complete, goodbye!");
+            sinfo!("Stasis", "Shutdown complete, goodbye!");
             std::process::exit(0);
         }
     });
@@ -179,7 +179,7 @@ async fn spawn_wayland_monitor(
 
             // Try connecting to the Wayland socket
             if UnixStream::connect(&socket_path).await.is_err() {
-                log_message("Wayland compositor is no longer responding, shutting down...");
+                sinfo!("Stasis", "Wayland compositor is no longer responding, shutting down...");
 
                 // Shutdown idle timer
                 manager.lock().await.shutdown().await;
@@ -188,7 +188,7 @@ async fn spawn_wayland_monitor(
                 app_inhibitor.lock().await.shutdown().await;
 
                 let _ = std::fs::remove_file(SOCKET_PATH);
-                log_message("Shutdown complete, goodbye!");
+                sinfo!("Stasis", "Shutdown complete, goodbye!");
                 std::process::exit(0);
             }
         }

@@ -1,12 +1,8 @@
 use std::time::{Duration, Instant};
 use crate::{
-    config::model::{IdleActionBlock, StasisConfig, IdleAction}, 
-    core::manager::{
-        actions::run_action,
-        processes::{is_process_active, is_process_running, run_command_silent},
-        Manager,
-    },
-    log::{log_debug_message, log_message},
+    config::model::{IdleAction, IdleActionBlock, StasisConfig}, core::manager::{
+        Manager, actions::run_action, processes::{is_process_active, is_process_running, run_command_silent}
+    }, sdebug, serror, sinfo
 };
 
 pub async fn lock_still_active(state: &crate::core::manager::state::ManagerState) -> bool {
@@ -42,20 +38,20 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     };
 
     if actions_to_trigger.is_empty() {
-        log_message("No actions defined to trigger");
+        sinfo!("Stasis", "No actions defined to trigger");
         return;
     }
 
-    log_message(&format!("Triggering all idle actions for '{}'", block_name));
+    sinfo!("Stasis", "Triggering all idle actions for '{}'", block_name);
 
     for action in actions_to_trigger {
         // Skip lockscreen if already locked
         if matches!(action.kind, IdleAction::LockScreen) && mgr.state.lock.is_locked {
-            log_message("Skipping lock action: already locked");
+            sdebug!("Stasis", "Skipping lock action: already locked");
             continue;
         }
 
-        log_message(&format!("Triggering idle action '{}'", action.name));
+        sinfo!("Stasis", "Triggering idle action '{}'", action.name);
         run_action(mgr, &action).await;
     }
 
@@ -73,7 +69,7 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     }
 
     mgr.state.actions.action_index = actions_mut.len().saturating_sub(1);
-    log_message("All idle actions triggered manually");
+    sinfo!("Stasis", "All idle actions triggered");
 }
 
 pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
@@ -90,18 +86,18 @@ pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
 
 pub async fn trigger_pre_suspend(mgr: &mut Manager) {
     if let Some(cmd) = &mgr.state.pre_suspend_command {
-        log_message(&format!("Running pre-suspend command: {}", cmd));
+        sinfo!("Stasis", "Running pre-suspend command: {}", cmd);
 
         // Wait for it to finish (synchronous)
         match run_command_silent(cmd).await {
-            Ok(_) => log_message("Pre-suspend command finished"),
-            Err(e) => log_message(&format!("Pre-suspend command failed: {}", e)),
+            Ok(_) => sinfo!("Stasis", "Pre-suspend command finished"), 
+            Err(e) => serror!("Stasis", "Pre-suspend command failed: {}", e), 
         }
     }
 }
 
 pub async fn advance_past_lock(mgr: &mut Manager) {
-    log_debug_message("Advancing state past lock stage...");
+    sdebug!("Stasis", "Advancing state past lock stage...");
     
     let now = Instant::now();
     mgr.state.lock.post_advanced = true;
@@ -153,17 +149,12 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
         
         if next_index < actions.len() {
             actions[next_index].last_triggered = Some(now);
-            log_debug_message(&format!(
-                "Advanced to action index {} ({}), will fire in {}s",
-                next_index,
-                actions[next_index].name,
-                actions[next_index].timeout
-            ));
+            sdebug!("Stasis", "Advanced to action index {} ({}), will fire in {}s", next_index, actions[next_index].name, actions[next_index].timeout);
         } else {
-            log_debug_message("Advanced past all actions (at end of chain)");
+            sdebug!("Stasis", "Advanced past all actions (at end of sequence)");
         }
     } else {
-        log_debug_message("No lock action found in active block");
+        sdebug!("Stasis", "No lock action found in active block");
     }
 }
 

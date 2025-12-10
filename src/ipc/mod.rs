@@ -10,14 +10,11 @@ use tokio::{
 };
 
 use crate::{
-    config, core::{
-        manager::{helpers::{set_manually_paused, trigger_all_idle_actions, current_profile}, Manager}, 
+    SOCKET_PATH, config, core::{
+        manager::{Manager, helpers::{current_profile, set_manually_paused, trigger_all_idle_actions}}, 
         services::app_inhibit::AppInhibitor,
         utils::format_duration,
-    }, 
-    ipc::commands::trigger_action_by_name, 
-    log::{log_debug_message, log_error_message, log_message}, 
-    SOCKET_PATH
+    }, ipc::commands::trigger_action_by_name, sdebug, serror, sinfo
 };
 
 pub async fn spawn_ipc_socket_with_listener(
@@ -39,7 +36,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                 Ok(n) if n > 0 => {
                                     let cmd = String::from_utf8_lossy(&buf[..n]).trim().to_string();
                                     if !cmd.contains("--json") {
-                                        log_debug_message(&format!("Received IPC command: {}", cmd));
+                                        sdebug!("Stasis", "Received IPC command: {}", cmd);
                                     }
 
                                     let response = match cmd.as_str() {
@@ -77,11 +74,11 @@ pub async fn spawn_ipc_socket_with_listener(
                                                     
                                                     let new_monitor_media = combined.base.monitor_media;
                                                     if new_monitor_media {
-                                                        log_message("Restarting media monitoring after config reload...");
+                                                        sinfo!("Stasis", "Restarting media monitoring after config reload...");
                                                         if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
                                                             Arc::clone(&manager)
                                                         ).await {
-                                                            log_error_message(&format!("Failed to restart media monitor: {}", e));
+                                                            serror!("Stasis", "Failed to restart media monitor: {}", e);
                                                         }
                                                         
                                                         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -124,7 +121,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                         Err(_) => false,
                                                     };
 
-                                                    log_debug_message("Config reloaded successfully");
+                                                    sdebug!("Stasis", "Config reloaded successfully");
                                                     
                                                     if let Some(cfg) = &cfg_clone {
                                                         format!(
@@ -144,7 +141,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    log_error_message(&format!("Failed to reload config: {}", e));
+                                                    serror!("Stasis", "Failed to reload config: {}", e);
                                                     format!("ERROR: Failed to reload config: {e}")
                                                 }
                                             }
@@ -186,12 +183,12 @@ pub async fn spawn_ipc_socket_with_listener(
                                             let step = cmd.strip_prefix("trigger ").unwrap_or("").trim();
 
                                             if step.is_empty() {
-                                                log_error_message("Trigger command missing action name");
+                                                serror!("Stasis", "Trigger command missing action name");
                                                 "ERROR: No action name provided".to_string()
                                             } else if step == "all" {
                                                 let mut mgr = manager.lock().await;
                                                 trigger_all_idle_actions(&mut mgr).await;
-                                                log_debug_message("Triggered all idle actions");
+                                                sdebug!("Stasis", "Triggered all idle actions");
                                                 "All idle actions triggered".to_string()
                                             } else {
                                                 match trigger_action_by_name(manager.clone(), step).await {
@@ -206,7 +203,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                             let profile_arg = cmd.strip_prefix("profile ").unwrap_or("").trim();
                                             
                                             if profile_arg.is_empty() {
-                                                log_error_message("Profile command missing profile name");
+                                                serror!("Stasis", "Profile command missing profile name");
                                                 "ERROR: No profile name provided".to_string()
                                             } else {
                                                 let profile_name = if profile_arg.eq_ignore_ascii_case("none") {
@@ -218,15 +215,12 @@ pub async fn spawn_ipc_socket_with_listener(
                                                 let mut mgr = manager.lock().await;
                                                 match mgr.set_profile(profile_name).await {
                                                     Ok(msg) => {
-                                                        log_message(&format!(
-                                                            "Profile switched: {}",
-                                                            profile_name.unwrap_or("base config")
-                                                        ));
+                                                        sinfo!("Stasis", "Profile switched: {}", profile_name.unwrap_or("base config"));
                                                         mgr.trigger_instant_actions().await;
                                                         msg
                                                     }
                                                     Err(e) => {
-                                                        log_error_message(&format!("Failed to set profile: {}", e));
+                                                        serror!("Stasis", "Failed to set profile: {}", e);
                                                         format!("ERROR: {}", e)
                                                     }
                                                 }
@@ -235,12 +229,12 @@ pub async fn spawn_ipc_socket_with_listener(
 
                                         // === CONTROL ===
                                         "stop" => {
-                                            log_message("Received stop command — shutting down gracefully");
+                                            sinfo!("Stasis", "Received stop command - Shutting down gracefully");
                                             let manager_clone = Arc::clone(&manager);
                                             tokio::spawn(async move {
                                                 let mut mgr = manager_clone.lock().await;
                                                 mgr.shutdown().await;
-                                                log_message("Manager shutdown complete, exiting process");
+                                                sinfo!("Stasis", "Manager shutdown complete, exiting process");
                                                 let _ = std::fs::remove_file(SOCKET_PATH);
                                                 std::process::exit(0);
                                             });
@@ -253,10 +247,10 @@ pub async fn spawn_ipc_socket_with_listener(
 
                                             if currently_inhibited {
                                                 set_manually_paused(&mut mgr, false).await;
-                                                log_debug_message("Manual inhibit disabled (toggle)");
+                                                sdebug!("Stasis", "Manual inhibit disabled (toggle)");
                                             } else {
                                                 set_manually_paused(&mut mgr, true).await;
-                                                log_debug_message("Manual inhibit enabled (toggle)");
+                                                sdebug!("Stasis", "Manual inhibit enabled (toggle)");
                                             }
 
                                             let response = if currently_inhibited {
@@ -382,33 +376,33 @@ pub async fn spawn_ipc_socket_with_listener(
                                         }
 
                                         _ => {
-                                            log_error_message(&format!("Unknown IPC command: {}", cmd));
+                                            serror!("Stasis", "Unknown IPC command: {}", cmd);
                                             format!("ERROR: Unknown command '{}'", cmd)
                                         }
                                     };
 
                                     if let Err(e) = stream.write_all(response.as_bytes()).await {
-                                        log_error_message(&format!("Failed to write IPC response: {e}"));
+                                        serror!("Stasis", "Failed to write IPC response: {}", e);
                                     } else {
                                         let _ = stream.flush().await;
                                     }
                                 }
                                 Ok(_) => {}
                                 Err(e) => {
-                                    log_error_message(&format!("Failed to read IPC command: {e}"));
+                                    serror!("Stasis", "Failed to read IPC command: {}", e);
                                 }
                             }
                         }).await;
                         
                         if result.is_err() {
-                            log_error_message("IPC connection timed out after 10 seconds");
+                            serror!("Stasis", "IPC connection timed out after 10 seconds");
                         }
                         
                         let _ = stream.shutdown().await;
                     });
                 }
 
-                Err(e) => log_error_message(&format!("Failed to accept IPC connection: {}", e)),
+                Err(e) => serror!("Stasis", "Failed to accept IPC connection: {}", e)
             }
         }
     });

@@ -23,8 +23,10 @@ use crate::{
         helpers::{profile_to_stasis_config, has_lock_action, get_lock_index},
         processes::{is_process_running, run_command_detached},
         tasks::TaskManager,
-    }, 
-    log::{log_debug_message, log_message}
+    },
+    sinfo,
+    sdebug,
+    serror,
 };
 
 pub struct Manager {
@@ -54,7 +56,7 @@ impl Manager {
 
         let instant_actions = self.state.get_active_instant_actions();
 
-        log_debug_message("Triggering instant actions at startup...");
+        sinfo!("Stasis", "Triggering instant actions...");
         for action in instant_actions {
             run_action(self, &action).await;
         }
@@ -74,12 +76,12 @@ impl Manager {
         }
         self.state.actions.action_index = index;
 
-        log_debug_message(&format!("Instant actions complete, starting at index {}", index));
+        sdebug!("Stasis", "Instant actions complete, starting at index {}", index);
     }
 
     pub fn reset_instant_actions(&mut self) {
         self.state.actions.instants_triggered = false;
-        log_debug_message("Instant actions reset; they can trigger again");
+        sdebug!("Stasis", "Instant actions reset");
     }
 
     // Check if any actions have surpassed their timeout period
@@ -141,10 +143,10 @@ impl Manager {
             if now >= base_timeout_instant {
                 if let Some(ref notification_msg) = actions[index].notification {
                     let notify_cmd = format!("notify-send -a Stasis '{}'", notification_msg);
-                    log_message(&format!("Sending pre-action notification: {}", notification_msg));
+                    sinfo!("Stasis", "Sending pre-action notification: {}", notification_msg);
                     
                     if let Err(e) = run_command_detached(&notify_cmd).await {
-                        log_message(&format!("Failed to send notification: {}", e));
+                        serror!("Stasis", "Failed to send notification: {}", e);
                     }
                     
                     self.state.notifications.mark_sent();
@@ -179,23 +181,23 @@ impl Manager {
                     if let Some(lock_idx) = lock_index {
                         if index < lock_idx {
                             // Pre-lock action - save for unlock
-                            log_debug_message(&format!("Queueing pre-lock resume for: {}", action_clone.name));
+                            sdebug!("Stasis", "Queueing pre-lock resume for: {}", action_clone.name);
                             self.state.actions.pre_lock_resume_queue.push(action_clone.clone());
                             
                             // DPMS exception: Also add to post-lock queue so it fires on reset while locked
                             if matches!(action_clone.kind, IdleAction::Dpms) {
-                                log_debug_message(&format!("DPMS action - also queueing for post-lock resume: {}", action_clone.name));
+                                sdebug!("Stasis", "DPMS action - also queing for post-lock resume: {}", action_clone.name);
                                 self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                             }
                         } else {
                             // Post-lock action - fire on next reset while locked
-                            log_debug_message(&format!("Queueing post-lock resume for: {}", action_clone.name));
+                            sdebug!("Stasis", "Queueing post-lock resume for: {}", action_clone.name);
                             self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                         }
                     }
                 } else {
                     // No lock action - add to post-lock queue (will fire on reset)
-                    log_debug_message(&format!("Queueing resume for: {}", action_clone.name));
+                    sdebug!("Stasis", "Queueing resume command for: {}", action_clone.name);
                     self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                 }
             }
@@ -216,14 +218,14 @@ impl Manager {
         let cfg = match &self.state.cfg {
             Some(cfg) => Arc::clone(cfg),
             None => {
-                log_debug_message("No configuration available, skipping reset");
+                sdebug!("Stasis", "No configuration available, skipping reset");
                 return;
             }
         };
 
         if self.state.brightness.previous_brightness.is_some() {
             if let Err(e) = restore_brightness(&mut self.state).await {
-                log_message(&format!("Failed to restore brightness: {}", e));
+                sinfo!("Stasis", "Failed to restore brightness: {}", e);
             }
         }
         
@@ -394,13 +396,14 @@ impl Manager {
                 base_timeout_instant
             };
 
-            //log_debug_message(&format!(
-            //    "next_action_instant: action={}, base_timeout={:?}s, notification_sent={}, next_wake={:?}s",
-            //    action.name,
-            //    base_timeout_instant.duration_since(self.state.start_time).as_secs(),
-            //    self.state.notification_sent,
-            //    next_wake_time.duration_since(self.state.start_time).as_secs()
-            //));
+            // sdebug!(
+            //     "Idle",
+            //     "next_action_instant: action={}, base_timeout={:?}s, notification_sent={}, next_wake={:?}s",
+            //     action.name,
+            //     base_timeout_instant.duration_since(self.state.start_time).as_secs(),
+            //     self.state.notification_sent,
+            //     next_wake_time.duration_since(self.state.start_time).as_secs()
+            // );
 
             min_time = Some(match min_time {
                 None => next_wake_time,
@@ -453,10 +456,10 @@ impl Manager {
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.inhibitors.manually_paused = true;
-            log_debug_message("Idle timers manually paused");
+            sdebug!("Stasis", "Idle timers manually paused");
         } else if !self.state.inhibitors.manually_paused {
             self.state.inhibitors.paused = true;
-            log_message("Idle timers automatically paused");
+            sdebug!("Stasis", "Idle timers automatically paused");
         }
     }
 
@@ -467,18 +470,15 @@ impl Manager {
                 
                 if self.state.inhibitors.active_inhibitor_count == 0 {
                     self.state.inhibitors.paused = false;
-                    log_message("Idle timers manually resumed");
+                    sinfo!("Stasis", "Idle timers manually resumed");
                 } else {
-                    log_message(&format!(
-                        "Manual pause cleared, but {} inhibitor(s) still active - timers remain paused",
-                        self.state.inhibitors.active_inhibitor_count
-                    ));
+                    sinfo!("Stasis", "Manual paused cleaed, but {} inhibitor(s) still active", self.state.inhibitors.active_inhibitor_count);
                 }
             }
         } else if !self.state.inhibitors.manually_paused && self.state.inhibitors.paused {
             // This is called by decr_active_inhibitor when count reaches 0
             self.state.inhibitors.paused = false;
-            log_message("Idle timers automatically resumed");
+            sinfo!("Stasis", "Idle timers automatically resumed");
         }
     }
 

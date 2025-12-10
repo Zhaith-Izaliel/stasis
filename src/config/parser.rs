@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use crate::{
     config::model::*, 
     core::utils::{ChassisKind, detect_chassis}, 
-    log::{log_debug_message, log_message},
+    sdebug, 
+    serror, 
+    sinfo, 
+    swarn 
 };
 
 fn parse_app_pattern(s: &str) -> Result<AppInhibitPattern> {
@@ -128,7 +131,7 @@ fn load_merged_config() -> Result<RuneConfig> {
         if user_path.exists() {
             config = RuneConfig::from_file(&user_path)
                 .wrap_err_with(|| format!("failed to load user config from {}", user_path.display()))?;
-            log_debug_message(&format!("Loaded config from: {}", user_path.display()));
+            sdebug!("Stasis", "Loaded config from: {}", user_path.display());
             return Ok(config);
         }
     }
@@ -136,18 +139,18 @@ fn load_merged_config() -> Result<RuneConfig> {
     if system_path.exists() {
         config = RuneConfig::from_file(&system_path)
             .wrap_err_with(|| format!("failed to load system config from {}", system_path.display()))?;
-        log_debug_message(&format!("Loaded config from: {}", system_path.display()));
+        sdebug!("Stasis", "Loaded config frm: {}", system_path.display()); 
         return Ok(config);
     }
 
     if share_path.exists() {
         config = RuneConfig::from_file(&share_path)
             .wrap_err_with(|| format!("failed to load shared example config from {}", share_path.display()))?;
-        log_debug_message(&format!("Loaded config from: {}", share_path.display()));
+        sdebug!("Stasis", "Loaded config from: {}", share_path.display());
         return Ok(config);
     }
 
-    log_debug_message("Using internal default configuration");
+    sdebug!("Stasis", "Using internal default configuration");
     Ok(config)
 }
 
@@ -280,32 +283,33 @@ fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
     };
   
     if actions.is_empty() {
-        // don't fail — load an empty action list and let the runtime decide what to do
-        log_message("No valid idle actions found in base config; continuing with empty actions.");
+        sinfo!("Stasis", "No valid idle actions found in base config, continuing with empty actions.");
         // optionally: return Err if you want to force at least one action in some modes
     }
 
-    log_debug_message("Parsed Config:");
-    log_debug_message(&format!("  pre_suspend_command = {:?}", pre_suspend_command));
-    log_debug_message(&format!("  monitor_media = {:?}", monitor_media));
-    log_debug_message(&format!("  ignore_remote_media = {:?}", ignore_remote_media));
-    log_debug_message(&format!(
+    sdebug!("Config", "Parsed Config:");
+    sdebug!("Config", "  pre_suspend_command = {:?}", pre_suspend_command);
+    sdebug!("Config", "  monitor_media = {:?}", monitor_media);
+    sdebug!("Config", "  ignore_remote_media = {:?}", ignore_remote_media);
+    sdebug!(
+        "Config",
         "  media_blacklist = [{}]",
         media_blacklist.join(", ")
-    ));
-    log_debug_message(&format!("  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors));
-    log_debug_message(&format!("  notify_on_unpause = {:?}", notify_on_unpause));
-    log_debug_message(&format!("  notify_before_action = {:?}", notify_before_action));
-    log_debug_message(&format!("  notify_seconds_before = {:?}", notify_seconds_before));
-    log_debug_message(&format!("  debounce_seconds = {:?}", debounce_seconds));
-    log_debug_message(&format!("  lid_close_action = {:?}", lid_close_action));
-    log_debug_message(&format!("  lid_open_action = {:?}", lid_open_action));
-    log_debug_message(&format!("  lock_detection_type = {:?}", lock_detection_type));
-    log_debug_message(&format!(
+    );
+    sdebug!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors);
+    sdebug!("Config", "  notify_on_unpause = {:?}", notify_on_unpause);
+    sdebug!("Config", "  notify_before_action = {:?}", notify_before_action);
+    sdebug!("Config", "  notify_seconds_before = {:?}", notify_seconds_before);
+    sdebug!("Config", "  debounce_seconds = {:?}", debounce_seconds);
+    sdebug!("Config", "  lid_close_action = {:?}", lid_close_action);
+    sdebug!("Config", "  lid_open_action = {:?}", lid_open_action);
+    sdebug!("Config", "  lock_detection_type = {:?}", lock_detection_type);
+    sdebug!(
+        "Config",
         "  inhibit_apps = [{}]",
         inhibit_apps.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
-    ));
-    log_debug_message("  actions:");
+    );
+    sdebug!("Stasis", "  actions:");
     for action in &actions {
         let mut details = format!(
             "    {}: timeout={}s, command=\"{}\"",
@@ -321,7 +325,7 @@ fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
         if let Some(notification) = &action.notification {
             details.push_str(&format!(", notification=\"{}\"", notification));
         }
-        log_debug_message(&details);
+        sdebug!("Stasis", "{}", &details);
     }
 
     let mut actions = actions;
@@ -351,7 +355,7 @@ fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConfig) 
     // Actions
     let actions = collect_actions(config, &base_path)?;
     if actions.is_empty() {
-        log_debug_message(&format!("Profile '{}' defines no actions; proceeding with empty actions.", profile_name));
+        swarn!("Stasis", "Profile '{}' defines no actions, proceeding with empty actions.", profile_name);
     }
 
     // Primitive fields: fallback to 'empty' values if undefined
@@ -488,7 +492,7 @@ fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Profile
         match parse_profile(config, &profile_name, base) {
             Ok(profile) => profiles.push(profile),
             Err(e) => {
-                log_debug_message(&format!("Failed to load profile '{}': {}", profile_name, e));
+                serror!("Stasis", "Failed to load profile '{}': {}", profile_name, e);
             }
         }
     }
@@ -508,7 +512,7 @@ pub fn load_combined_config() -> Result<CombinedConfig> {
     
     if !profiles.is_empty() {
         let profile_names: Vec<_> = profiles.iter().map(|p| p.name.as_str()).collect();
-        log_message(&format!("  profiles: {}", profile_names.join(", ")));
+        sinfo!("Stasis", "  profiles: {}", profile_names.join(", "));
     }
     
     Ok(CombinedConfig {

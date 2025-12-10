@@ -6,11 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     core::manager::{
-        actions::run_action, 
-        helpers::{advance_past_lock, trigger_pre_suspend}, 
-        Manager, 
-        processes::{run_command_detached}},
-    log::log_message,
+        Manager, actions::run_action, helpers::{advance_past_lock, trigger_pre_suspend}, processes::run_command_detached}, sinfo,
 };
 
 /// Helper function to strip ac. or battery. prefix from action names
@@ -89,7 +85,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         }
     };
 
-    log_message(&format!("Action triggered via IPC: '{}'", strip_action_prefix(&action.name)));
+    sinfo!("Stasis", "Action triggered via IPC '{}'", strip_action_prefix(&action.name));
     let is_lock = matches!(action.kind, crate::config::model::IdleAction::LockScreen);
 
     if is_lock {
@@ -99,7 +95,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         if uses_loginctl {
             // For loginctl-based locks, just trigger the command
             // The LoginctlLock event will handle the rest
-            log_message("Lock uses loginctl lock-session, triggering it via IPC");
+            sinfo!("Stasis", "Lock uses loginctl lock-session triggering it via IPC");
             if let Err(e) = run_command_detached(&action.command).await {
                 return Err(format!("Failed to trigger lock: {}", e));
             }

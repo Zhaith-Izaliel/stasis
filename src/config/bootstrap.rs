@@ -1,6 +1,6 @@
 use std::fs;
 use crate::core::utils::{detect_chassis, ChassisKind};
-use crate::log::log_message;
+use crate::sinfo;
 
 pub fn ensure_user_config_exists() -> std::io::Result<()> {
     if let Some(mut path) = dirs::home_dir() {
@@ -18,7 +18,7 @@ pub fn ensure_user_config_exists() -> std::io::Result<()> {
         
         let contents = generate_default_config();
         fs::write(&path, contents)?;
-        log_message(&format!("Stasis: Default config created at {:?}", path));
+        sinfo!("Stasis", "Default config config created at {:?}", path);
     }
     Ok(())
 }

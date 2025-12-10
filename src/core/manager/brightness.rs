@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use tokio::process::Command;
 
-use crate::log::{log_error_message, log_message};
 use crate::core::manager::state::ManagerState;
+use crate::{sinfo, sdebug, serror};
 
 #[derive(Clone, Debug)]
 struct BrightnessState {
@@ -15,20 +15,26 @@ struct BrightnessState {
 pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io::Error> {
     // Try sysfs method first
     if let Some(sys_brightness) = capture_sysfs_brightness() {
-        log_message(&format!("Captured brightness via sysfs: {}/{} on device '{}'", 
-            sys_brightness.value, sys_brightness.max_brightness, sys_brightness.device));
+        sdebug!(
+            "Brightness",
+            "Captured brightness via sysfs: {}/{} on device '{}'",
+            sys_brightness.value,
+            sys_brightness.max_brightness,
+            sys_brightness.device
+        );
 
         // Use the BrightnessManager to store state
         state.brightness.store(
             sys_brightness.value,
             sys_brightness.max_brightness,
-            sys_brightness.device
+            sys_brightness.device,
         );
         return Ok(());
     }
 
     // Fallback to brightnessctl
-    log_message("Falling back to brightnessctl for brightness capture");
+    sinfo!("Brightness", "Falling back to brightnessctl for brightness capture");
+
     match Command::new("brightnessctl").arg("get").output().await {
         Ok(out) if out.status.success() => {
             let val = String::from_utf8_lossy(&out.stdout)
@@ -36,13 +42,13 @@ pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io:
                 .parse::<u32>()
                 .unwrap_or(0);
             state.brightness.store_simple(val);
-            log_message(&format!("Captured brightness via brightnessctl: {}", val));
+            sdebug!("Brightness", "Captured brightness via brightnessctl: {}", val);
         }
         Ok(out) => {
-            log_error_message(&format!("brightnessctl get failed: {:?}", out.status));
+            serror!("Brightness", "brightnessctl get failed: {:?}", out.status);
         }
         Err(e) => {
-            log_error_message(&format!("Failed to execute brightnessctl: {}", e));
+            serror!("Brightness", "Failed to execute brightnessctl: {}", e);
         }
     }
 
@@ -51,14 +57,14 @@ pub async fn capture_brightness(state: &mut ManagerState) -> Result<(), std::io:
 
 pub async fn restore_brightness(state: &mut ManagerState) -> Result<(), std::io::Error> {
     let (brightness, device, _max) = state.brightness.get_restore_info();
-    
+
     if let Some(level) = brightness {
-        log_message(&format!("Attempting to restore brightness to {}", level));
+        sinfo!("Brightness", "Attempting to restore brightness to {}", level);
 
         // Try sysfs restore first if we have device info
         if let Some(device_name) = device {
             if restore_sysfs_brightness_to_device(&device_name, level).is_ok() {
-                log_message("Brightness restored via sysfs");
+                sinfo!("Brightness", "Brightness restored via sysfs");
                 state.brightness.clear();
                 return Ok(());
             }
@@ -66,21 +72,22 @@ pub async fn restore_brightness(state: &mut ManagerState) -> Result<(), std::io:
 
         // Fallback to generic sysfs restore
         if restore_sysfs_brightness(level).is_ok() {
-            log_message("Brightness restored via sysfs (generic)");
+            sinfo!("Brightness", "Brightness restored via sysfs (generic)");
         } else {
-            log_message("Falling back to brightnessctl for brightness restore");
+            sinfo!("Brightness", "Falling back to brightnessctl for brightness restore");
             if let Err(e) = Command::new("brightnessctl")
                 .arg("set")
                 .arg(level.to_string())
                 .output()
                 .await
             {
-                log_error_message(&format!("Failed to restore brightness: {}", e));
+                serror!("Brightness", "Failed to restore brightness: {}", e);
             }
         }
 
         state.brightness.clear();
     }
+
     Ok(())
 }
 
@@ -91,7 +98,7 @@ fn capture_sysfs_brightness() -> Option<BrightnessState> {
 
     let current = fs::read_to_string(base.join(&device).join("brightness")).ok()?;
     let max = fs::read_to_string(base.join(&device).join("max_brightness")).ok()?;
-    
+
     Some(BrightnessState {
         value: current.trim().parse().ok()?,
         max_brightness: max.trim().parse().ok()?,

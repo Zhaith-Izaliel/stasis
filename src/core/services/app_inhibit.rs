@@ -6,8 +6,8 @@ use procfs::process::all_processes;
 
 use crate::config::model::StasisConfig;
 use crate::core::manager::inhibitors::{decr_active_inhibitor, incr_active_inhibitor};
-use crate::log::{log_message, log_debug_message};
 use crate::core::manager::Manager;
+use crate::{sdebug, sinfo};
 
 /// Tracks currently running apps to inhibit idle
 pub struct AppInhibitor {
@@ -23,7 +23,7 @@ impl AppInhibitor {
             .unwrap_or_default()
             .to_lowercase();
 
-        log_debug_message(&format!("XDG_CURRENT_DESKTOP detected: {}", desktop));
+        sdebug!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop);
 
         Self {
             cfg,
@@ -50,7 +50,7 @@ impl AppInhibitor {
 
         for app in &new_active_apps {
             if !self.active_apps.contains(app) {
-                log_message(&format!("App inhibit active: {}", app));
+                sinfo!("Stasis", "App inhibit active: {}", app);
             }
         }
 
@@ -168,7 +168,7 @@ impl AppInhibitor {
     }
 
     pub async fn shutdown(&mut self) {
-        log_message("Shutting down app inhibitor...");
+        sinfo!("Stasis", "Shutting down app inhibitor...");
         self.active_apps.clear();
     }
 }
@@ -180,7 +180,7 @@ pub async fn spawn_app_inhibit_task(
     let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(cfg.clone(), Arc::clone(&manager))));
 
     if cfg.inhibit_apps.is_empty() {
-        log_message("No inhibit_apps configured, sleeping app inhibitor.");
+        sinfo!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
         tokio::spawn(async move {
             futures::future::pending::<()>().await;
         });

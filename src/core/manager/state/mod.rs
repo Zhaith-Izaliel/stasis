@@ -13,7 +13,7 @@ use std::{sync::Arc, time::Instant};
 use tokio::sync::Notify;
 
 use crate::{
-    config::model::{IdleActionBlock, StasisConfig, CombinedConfig},
+    config::model::{CombinedConfig, IdleActionBlock, StasisConfig},
     core::manager::state::{
         actions::ActionState, 
         brightness::BrightnessState, 
@@ -25,8 +25,7 @@ use crate::{
         power::PowerState, 
         profile::ProfileState,
         timing::TimingState
-    },
-    log::log_debug_message,
+    }, sdebug,
 };
 
 #[derive(Debug)]
@@ -165,19 +164,13 @@ impl ManagerState {
         self.lock = LockState::from_config(cfg);
         self.timing.last_activity = Instant::now();
 
-        log_debug_message(&format!(
-            "Idle timers reloaded from config (active block: {})",
-            self.power.current_block
-        ));
+        sdebug!("Stasis", "Idle timers reloaded from config (active block: {})", self.power.current_block);
     }
 
     /// NEW: Reload profiles from combined config
     pub async fn reload_profiles(&mut self, combined: &CombinedConfig) {
         self.profile.update_profiles(combined.profiles.clone());
-        log_debug_message(&format!(
-            "Reloaded {} profile(s)",
-            combined.profiles.len()
-        ));
+        sdebug!("Stasis", "Reloaded {} profile(s)", combined.profiles.len());
     }
 
     pub fn wake_idle_tasks(&self) {

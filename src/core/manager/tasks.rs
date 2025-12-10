@@ -1,5 +1,6 @@
 use tokio::task::JoinHandle;
-use crate::log::log_message;
+
+use crate::sinfo;
 
 /// Hard cap on concurrent background tasks.
 const MAX_SPAWNED_TASKS: usize = 10;
@@ -39,7 +40,7 @@ impl TaskManager {
         if self.spawned_tasks.len() < MAX_SPAWNED_TASKS {
             self.spawned_tasks.push(tokio::spawn(fut));
         } else {
-            log_message("Max spawned tasks reached, skipping task spawn");
+            sinfo!("Stasis", "Max spawned tasks reached, skipping task spawn");
         }
     }
 
@@ -71,7 +72,7 @@ where
     if tasks.len() < MAX_SPAWNED_TASKS {
         tasks.push(tokio::spawn(fut));
     } else {
-        log_message("Max spawned tasks reached, skipping task spawn");
+        sinfo!("Stasis", "Max spawned tasks reached, skipping task spawn");
     }
 }
 

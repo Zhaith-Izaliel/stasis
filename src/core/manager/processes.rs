@@ -3,7 +3,7 @@ use eyre::Result;
 use tokio::process::Command;
 use std::process::Stdio;
 
-use crate::log::{log_message, log_debug_message};
+use crate::{sdebug, sinfo};
 
 /// Information about a spawned process
 #[derive(Debug, Clone)]
@@ -60,11 +60,8 @@ pub async fn run_command_detached(command: &str) -> Result<ProcessInfo, Box<dyn 
     
     // Extract expected process name from command for later verification
     let expected_name = extract_expected_process_name(command);
-    
-    log_debug_message(&format!(
-        "Spawned process: PID={}, PGID={}, expected_name={:?}",
-        pid, pgid, expected_name
-    ));
+   
+    sdebug!("Stasis", "Spawned process: PID={}, PGID={}, expected_name={:?}", pid, pgid, expected_name);
 
     Ok(ProcessInfo {
         pid,
@@ -111,10 +108,7 @@ pub async fn is_process_active(info: &ProcessInfo) -> bool {
     // Strategy 2: Check process group for any surviving members
     if let Some(pids) = get_process_group_members(info.pgid).await {
         if !pids.is_empty() {
-            log_message(&format!(
-                "Original PID {} dead, but process group {} has {} member(s)",
-                info.pid, info.pgid, pids.len()
-            ));
+            sinfo!("Stasis", "Original PID {} dead, but process group {} has {} member(s)", info.pid, info.pgid, pids.len());
             return true;
         }
     }
@@ -122,10 +116,7 @@ pub async fn is_process_active(info: &ProcessInfo) -> bool {
     // Strategy 3: If we know the expected process name, search for it
     if let Some(ref name) = info.expected_process_name {
         if is_process_running(name).await {
-            log_message(&format!(
-                "Process group empty, but found '{}' by name",
-                name
-            ));
+            sinfo!("Stasis", "Process group empty, but found '{}' by name", name);
             return true;
         }
     }
@@ -194,10 +185,7 @@ pub async fn is_process_running(cmd: &str) -> bool {
 
 /// Forcefully kill a process and its entire process group
 pub async fn kill_process_group(info: &ProcessInfo) -> Result<()> {
-    log_message(&format!(
-        "Killing process group {} (original PID: {})",
-        info.pgid, info.pid
-    ));
+    sinfo!("Stasis", "Killing process group {} (original PID: {})", info.pgid, info.pid);
     
     // Kill entire process group
     let _ = Command::new("kill")
@@ -211,10 +199,7 @@ pub async fn kill_process_group(info: &ProcessInfo) -> Result<()> {
     
     // Force kill if still alive
     if is_process_active(info).await {
-        log_message(&format!(
-            "Process group {} still alive, sending SIGKILL",
-            info.pgid
-        ));
+        sinfo!("Stasis", "Process group {} still alive, sending SIGKILL", info.pgid);
         let _ = Command::new("kill")
             .arg("-KILL")
             .arg(format!("-{}", info.pgid))
@@ -248,13 +233,12 @@ pub async fn is_session_locked_logind() -> bool {
         Ok(result) => {
             let stdout = String::from_utf8_lossy(&result.stdout);
             let trimmed = stdout.trim();
-            log_debug_message(&format!("logind LockedHint ({}): {}", session_id, trimmed));
+            sdebug!("Stasis", "logind LockHin ({}): {}", session_id, trimmed);
 
-            // busctl format: "b true" or "b false"
             trimmed.ends_with("true")
         }
         Err(e) => {
-            log_debug_message(&format!("Failed to query logind LockedHint: {}", e));
+            sdebug!("Stasis", "Failed to query logind LockedHint: {}", e);
             false
         }
     }

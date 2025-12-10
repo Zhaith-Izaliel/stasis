@@ -1,11 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::core::{
-    manager::{actions::run_action, helpers::advance_past_lock, Manager, processes::{run_command_detached}}
-};
+use crate::{core::manager::{Manager, actions::run_action, helpers::advance_past_lock, processes::run_command_detached}, sdebug, serror, sinfo};
 use crate::{config::model::{IdleAction, LidCloseAction, LidOpenAction}};
-use crate::log::{log_debug_message, log_error_message, log_message};
 
 pub enum Event {
     InputActivity,
@@ -63,7 +60,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
         }
 
         Event::Wake => {
-            log_message("System resumed from suspend - resetting state");
+            sinfo!("Stasis", "System resumed from suspend - resetting state");
             
             let mut mgr = manager.lock().await;
             mgr.resume(false).await;
@@ -91,7 +88,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
 
         Event::LidClosed => {
             let mut mgr = manager.lock().await;
-            log_message("Lid closed — handling event...");
+            sinfo!("Stasis", "Lid closed - handling event...");
 
             // clone the lid_close_action and lock_action before mutably borrowing
             if let Some(cfg) = &mgr.state.cfg {
@@ -112,14 +109,14 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                         }
                     }                    
                     LidCloseAction::Custom(cmd) => {
-                        log_message(&format!("Running custom lid-close command: {}", cmd));
+                        sinfo!("Stasis", "Running custom lid-close command: {}", cmd);
                         match run_command_detached(&cmd).await {
-                            Ok(pid) => log_debug_message(&format!("Custom lid-close command started with PID {}", pid.pid)),
-                            Err(e) => log_error_message(&format!("Failed to run custom lid-close command: {}", e)),
+                            Ok(pid) => sdebug!("Stasis", "Custom lid-close command started with PID {}", pid.pid),
+                            Err(e) => serror!("Stasis", "Failed to run custom lid-close command: {}", e),
                         }
                     }
                     LidCloseAction::Ignore => {
-                        log_message("Lid close ignored by config");
+                        sdebug!("Stasis", "Lid close ignored by config");
                     }
                 }
             }
@@ -127,7 +124,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
 
         Event::LidOpened => {
             let mut mgr = manager.lock().await;
-            log_message("Lid opened — handling event...");
+            sinfo!("Stasis", "Lid opened - handling event...");
 
             if let Some(cfg) = &mgr.state.cfg {
                 match &cfg.lid_open_action {
@@ -137,11 +134,11 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
                         mgr.state.wake_idle_tasks();
                     }                   
                     LidOpenAction::Custom(cmd) => {
-                        log_message(&format!("Running custom lid-open command: {}", cmd));
+                        sinfo!("Stasis", "Running custom lid-open command: {}", cmd);
                         let _ = run_command_detached(cmd).await;
                     }
                     LidOpenAction::Ignore => {
-                        log_message("Lid open ignored by config");
+                        sdebug!("Stasis", "Lid open ignored by config");
                     }
                 }
             }
@@ -149,10 +146,10 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
 
         Event::LoginctlLock => {
             let mut mgr = manager.lock().await;
-            log_debug_message("loginctl lock-session received — handling lock...");
+            sdebug!("Stasis", "loginctl lock-session received - handling lock...");
 
             if mgr.state.lock.is_locked {
-                log_message("Already locked, ignoring loginctl lock-session event");
+                sinfo!("Stasis", "Already locked, ignoring loginctl lock-session event");
                 return;
             }
 
@@ -169,17 +166,13 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
             
             // Run the lock-command if it exists
             if let Some(lock_cmd) = lock_cmd_opt {
-                log_message(&format!("Running lock-command: {}", lock_cmd));
+                sinfo!("Stasis", "Running lock-command: {}", lock_cmd);
                 match run_command_detached(&lock_cmd).await {
-                    Ok(pid) => {
-                        mgr.state.lock.process_info = Some(pid.clone());
-                    }
-                    Err(e) => {
-                        log_message(&format!("Failed to run lock-command: {}", e));
-                    }
+                    Ok(pid) => mgr.state.lock.process_info = Some(pid.clone()),
+                    Err(e) => serror!("Stasis", "Failed to run lock-command: {}", e),
                 }
             } else {
-                log_message("No lock-command configured");
+                sinfo!("Stasis", "No lock-command configured");
             }
             
             advance_past_lock(&mut mgr).await; 
@@ -188,7 +181,7 @@ pub async fn handle_event(manager: &Arc<Mutex<Manager>>, event: Event) {
 
         Event::LoginctlUnlock => {
             let mut mgr = manager.lock().await;
-            log_debug_message("loginctl unlock-session received — resetting state...");
+            sdebug!("Stasis", "loginctl unlock-session received - resetting state...");
             
             mgr.reset().await;
             mgr.state.lock_notify.notify_waiters();
