@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::manager::Manager;
-use crate::log::{log_error_message, log_wayland_message};
+use crate::{sdebug, serror, sinfo};
 
 use tokio::sync::Notify;
 
@@ -68,16 +68,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandIdleData {
                 "ext_idle_notifier_v1" => {
                     state.idle_notifier =
                         Some(registry.bind::<ExtIdleNotifierV1, _, _>(name, 1, qh, ()));
-                    log_wayland_message("Binding ext_idle_notifier_v1");
+                    sinfo!("Wayland", "Binding ext_idle_notifier_v1");
                 }
                 "wl_seat" => {
                     state.seat = Some(registry.bind::<WlSeat, _, _>(name, 1, qh, ()));
-                    log_wayland_message("Binding wl_seat");
+                    sinfo!("Wayland", "Binding wl_seat");
                 }
                 "zwp_idle_inhibit_manager_v1" => {
                     state.inhibit_manager =
                         Some(registry.bind::<ZwpIdleInhibitManagerV1, _, _>(name, 1, qh, ()));
-                    log_wayland_message("Binding zwp_idle_inhibit_manager_v1");
+                    sinfo!("Wayland", "Binding zwp_idle_inhibit_manager_v1");
                 }
                 _ => {}
             }
@@ -110,7 +110,7 @@ impl Dispatch<ExtIdleNotificationV1, ()> for WaylandIdleData {
 
         tokio::spawn(async move {
             if inhibited {
-                log_wayland_message("Idle inhibited; skipping idle trigger");
+                sdebug!("Wayland", "Idle inhibited, skipping idle trigger");
                 return;
             }
 
@@ -122,7 +122,7 @@ impl Dispatch<ExtIdleNotificationV1, ()> for WaylandIdleData {
                 }
                 IdleEvent::Resumed => { 
                     if mgr.state.lock.is_locked && !mgr.state.actions.post_lock_resume_queue.is_empty() {
-                        log_wayland_message("Activity detected while locked - firing post-lock resume commands");
+                        sinfo!("Wayland", "Activity detected while locked - firing post-lock resume commands");
                         mgr.fire_post_lock_resume_queue().await;
                     }
 
@@ -144,7 +144,7 @@ impl Dispatch<ZwpIdleInhibitorV1, ()> for WaylandIdleData {
         _: &QueueHandle<Self>,
     ) {
         state.active_inhibitors += 1;
-        log_wayland_message(&format!("Inhibitor created, count={}", state.active_inhibitors));
+        sdebug!("Wayland", "Inhibitor created, count={}", state.active_inhibitors);
     }
 }
 
@@ -159,7 +159,7 @@ impl Dispatch<ZwpIdleInhibitManagerV1, ()> for WaylandIdleData {
     ) {
         if state.active_inhibitors > 0 {
             state.active_inhibitors -= 1;
-            log_wayland_message(&format!("Inhibitor removed, count={}", state.active_inhibitors));
+            sdebug!("Wayland", "Inhibitor removed, count={}", state.active_inhibitors);
         }
     }
 }
@@ -180,10 +180,7 @@ pub async fn setup(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     respect_inhibitors: bool,
 ) -> Result<Arc<tokio::sync::Mutex<WaylandIdleData>>> {
-    log_wayland_message(&format!(
-        "Setting up Wayland idle detection (respect_inhibitors={})",
-        respect_inhibitors
-    ));
+    sinfo!("Wayland", "Setting up idle detection (respect inhibitors={})", respect_inhibitors);
 
     // Connect to Wayland
     let conn = Connection::connect_to_env()
@@ -204,7 +201,7 @@ pub async fn setup(
         let timeout_ms = 500;
         let notification = notifier.get_idle_notification(timeout_ms, seat, &qh, ());
         app_data.notification = Some(notification);
-        log_wayland_message("Wayland idle detection active");
+        sdebug!("Wayland", "Idle detection active")
     }
 
     let should_stop = Arc::clone(&app_data.should_stop);
@@ -230,7 +227,7 @@ pub async fn setup(
     tokio::task::spawn_blocking({
         let app_data = Arc::clone(&app_data);
         move || {
-            log_wayland_message("Wayland event loop started");
+            sdebug!("Wayland", "Event loop started");
             loop {
                 if should_stop.load(Ordering::Relaxed) {
                     break;
@@ -243,12 +240,13 @@ pub async fn setup(
                 match event_queue.blocking_dispatch(&mut *locked_data) {
                     Ok(_) => {},
                     Err(e) => {
-                        log_error_message(&format!("Wayland dispatch error: {}", e));
+                        serror!("Wayland", "Dispatch error {}", e);
                         break;
                     }
                 }
             }
-            log_wayland_message("Wayland event loop shutting down...");
+
+            sinfo!("Wayland", "event loop shutting down...");
         }
     });
 

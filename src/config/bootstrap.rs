@@ -1,28 +1,24 @@
 use std::fs;
 use crate::core::utils::{detect_chassis, ChassisKind};
-use crate::log::log_message;
+use crate::sinfo;
 
 pub fn ensure_user_config_exists() -> std::io::Result<()> {
     if let Some(mut path) = dirs::home_dir() {
         path.push(".config/stasis");
         
-        // Create directory if missing
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
         
-        // Append file name
         path.push("stasis.rune");
         
-        // If file exists, do nothing
         if path.exists() {
             return Ok(());
         }
         
-        // Otherwise, generate initial config
         let contents = generate_default_config();
         fs::write(&path, contents)?;
-        log_message(&format!("Stasis: Default config created at {:?}", path));
+        sinfo!("Stasis", "Default config config created at {:?}", path);
     }
     Ok(())
 }

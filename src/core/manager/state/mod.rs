@@ -6,13 +6,14 @@ pub mod lock;
 pub mod media;
 pub mod notifications;
 pub mod power;
+pub mod profile;
 pub mod timing;
 
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Notify;
 
 use crate::{
-    config::model::{IdleActionBlock, StasisConfig},
+    config::model::{CombinedConfig, IdleActionBlock, StasisConfig},
     core::manager::state::{
         actions::ActionState, 
         brightness::BrightnessState, 
@@ -22,9 +23,9 @@ use crate::{
         media::MediaState, 
         notifications::NotificationState, 
         power::PowerState, 
+        profile::ProfileState,
         timing::TimingState
-    },
-    log::log_debug_message,
+    }, sdebug,
 };
 
 #[derive(Debug)]
@@ -41,6 +42,7 @@ pub struct ManagerState {
     pub notifications: NotificationState,
     pub power: PowerState,
     pub pre_suspend_command: Option<String>,
+    pub profile: ProfileState,
     pub shutdown_flag: Arc<Notify>,
     pub suspend_occured: bool,
     pub timing: TimingState,
@@ -48,7 +50,6 @@ pub struct ManagerState {
 
 impl Default for ManagerState {
     fn default() -> Self {
-
         Self {
             actions: ActionState::default(),
             brightness: BrightnessState::default(),
@@ -62,6 +63,7 @@ impl Default for ManagerState {
             notifications: NotificationState::default(),
             power: PowerState::new_from_config(&[]),
             pre_suspend_command: None,
+            profile: ProfileState::default(),
             shutdown_flag: Arc::new(Notify::new()),
             suspend_occured: false,
             timing: TimingState::default(),
@@ -87,10 +89,27 @@ impl ManagerState {
             notifications: NotificationState::default(),
             power,
             pre_suspend_command: cfg.pre_suspend_command.clone(),
+            profile: ProfileState::default(),
             shutdown_flag: Arc::new(Notify::new()),
             suspend_occured: false,
             timing: TimingState::default(),
         }
+    }
+
+    /// NEW: Initialize with combined config (base + profiles)
+    pub fn new_with_profiles(combined: &CombinedConfig) -> Self {
+        let cfg = Arc::new(combined.base.clone());
+        let mut state = Self::new(cfg);
+        
+        // Load available profiles
+        state.profile.update_profiles(combined.profiles.clone());
+        
+        // Set active profile if specified
+        if let Some(active) = &combined.active_profile {
+            state.profile.set_active(Some(active.clone()));
+        }
+        
+        state
     }
 
     /// Power wrappers
@@ -113,20 +132,18 @@ impl ManagerState {
         self.notify.notify_one();
     }
 
-
     /// Action wrappers
     pub fn get_active_actions(&self) -> &[IdleActionBlock] {
-        self.power.active_actions()     // CHANGED
+        self.power.active_actions()
     }
 
     pub fn get_active_actions_mut(&mut self) -> &mut Vec<IdleActionBlock> {
-        self.power.active_actions_mut() // CHANGED
+        self.power.active_actions_mut()
     }
 
     pub fn get_active_instant_actions(&self) -> Vec<IdleActionBlock> {
-        self.power.active_instant_actions() // CHANGED
+        self.power.active_instant_actions()
     }
-
 
     /// Config reload
     pub async fn update_from_config(&mut self, cfg: &StasisConfig) {
@@ -147,12 +164,14 @@ impl ManagerState {
         self.lock = LockState::from_config(cfg);
         self.timing.last_activity = Instant::now();
 
-        log_debug_message(&format!(
-            "Idle timers reloaded from config (active block: {})",
-            self.power.current_block
-        ));
+        sdebug!("Stasis", "Idle timers reloaded from config (active block: {})", self.power.current_block);
     }
 
+    /// NEW: Reload profiles from combined config
+    pub async fn reload_profiles(&mut self, combined: &CombinedConfig) {
+        self.profile.update_profiles(combined.profiles.clone());
+        sdebug!("Stasis", "Reloaded {} profile(s)", combined.profiles.len());
+    }
 
     pub fn wake_idle_tasks(&self) {
         self.notify.notify_waiters();
@@ -162,4 +181,3 @@ impl ManagerState {
         self.inhibitors.manually_paused
     }
 }
-

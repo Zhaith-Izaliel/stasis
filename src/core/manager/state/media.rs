@@ -1,4 +1,5 @@
-use crate::log::log_message;
+use crate::sdebug;
+
 
 /// Manages media playback state from multiple sources
 #[derive(Debug, Default)]
@@ -30,13 +31,14 @@ impl MediaState {
         }
     }
 
-    pub fn log_state(&self) {
-        log_message(&format!(
+    pub fn log_state(&self) { 
+        sdebug!(
+            "Media",
             "Media State: bridge_active={}, browser_playing={} (tabs={}), mpris_playing={}",
             self.media_bridge_active,
             self.browser_media_playing,
             self.browser_playing_tab_count,
             self.media_playing,
-        ));
+        );
     }
 }

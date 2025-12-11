@@ -5,10 +5,9 @@ use mpris::{PlayerFinder, PlaybackStatus};
 use tokio::task;
 use zbus::{Connection, MatchRule, MessageStream};
 
-use crate::core::manager::{
-    inhibitors::{decr_active_inhibitor, incr_active_inhibitor},
-    Manager
-};
+use crate::{core::manager::{
+    Manager, inhibitors::{decr_active_inhibitor, incr_active_inhibitor}
+}, sdebug, serror, sinfo};
 
 // Players that are always considered local (browsers, local video players)
 // Note: Firefox is intentionally included here but handled specially
@@ -37,17 +36,17 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
     };
     
     if !monitor_media {
-        crate::log::log_message("Media monitoring disabled in config");
+        sinfo!("MPRIS", "Media monitor disabled in config");
         return Ok(());
     }
 
-    crate::log::log_message("Starting MPRIS media monitor");
+    sinfo!("MPRIS", "Starting media monitor");
 
     task::spawn(async move {
         let conn = match Connection::session().await {
             Ok(c) => c,
             Err(e) => {
-                crate::log::log_error_message(&format!("Failed to connect to D-Bus: {}", e));
+                serror!("MPRIS", "Failed to connect to D-Bus: {}", e);
                 return;
             }
         };
@@ -89,7 +88,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             if playing {
                 let mut mgr = manager.lock().await;
                 if !mgr.state.media.mpris_media_playing {
-                    crate::log::log_message("Initial MPRIS check: media playing");
+                    sinfo!("MPRIS", "Initial check: media playing");
                     incr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = true;
                     
@@ -127,7 +126,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 
                 // Update MPRIS-specific inhibitor
                 if any_playing && !mgr.state.media.mpris_media_playing {
-                    crate::log::log_message("MPRIS: media started");
+                    sdebug!("MPRIS", "Media started");
                     incr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = true;
                 } else if !any_playing && mgr.state.media.mpris_media_playing {
@@ -135,8 +134,8 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     if !bridge_active && has_playerctl_players() && has_any_media_playing() {
                         continue;
                     }
-                    
-                    crate::log::log_message("MPRIS: media stopped");
+                   
+                    sdebug!("MPRIS", "Media stopped");
                     decr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = false;
                 }
@@ -217,18 +216,13 @@ pub fn check_media_playing(
             return true;
         }
         
-        // For non-local players:
         if ignore_remote_media {
-            // User wants to skip remote media:
-            // we only accept this player if it has a real local sink-input.
             if is_player_local_by_pactl(&identity) {
                 return true;
             } else {
-                // It's remote → ignore it
                 continue;
             }
         } else {
-            // Not ignoring remote → treat as real media
             return true;
         }
     }
@@ -268,7 +262,7 @@ fn is_player_local_by_pactl(player_name: &str) -> bool {
         .output()
     {
         Ok(o) => o,
-        Err(_) => return false, // pactl failed → assume not local
+        Err(_) => return false,
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();

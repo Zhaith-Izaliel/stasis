@@ -7,8 +7,9 @@ use std::{
 
 use input::LibinputInterface;
 use tokio::sync::Mutex;
-use futures::FutureExt; // for now_or_never()
-use crate::{core::manager::Manager, log::log_message};
+use futures::FutureExt;
+use crate::core::manager::Manager;
+use crate::{sinfo};
 
 struct InputDetection;
 
@@ -45,7 +46,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 tokio::select! {
                     maybe_event = rx.recv() => {
                         if maybe_event.is_none() {
-                            log_message("Input async handler channel closed");
+                            sinfo!("Libinput", "Input async handler channel closed");
                             break;
                         }
 
@@ -59,7 +60,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 }
             }
 
-            log_message("libinput event loop shutting down...");
+            sinfo!("Libinput", "event loop shutting down...");
         });
 
         // Blocking thread: libinput event polling
@@ -123,7 +124,6 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                     }
                 }
 
-                // Only trigger reset if we had actual input
                 if has_real_input {
                     let now = Instant::now();
                     if now.duration_since(last_reset) >= DEBOUNCE {

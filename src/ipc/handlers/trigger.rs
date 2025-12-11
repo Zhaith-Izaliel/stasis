@@ -1,3 +1,4 @@
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -6,12 +7,41 @@ use tokio::sync::Mutex;
 
 use crate::{
     core::manager::{
-        actions::run_action, 
-        helpers::{advance_past_lock, trigger_pre_suspend}, 
         Manager, 
-        processes::{run_command_detached}},
-    log::log_message,
+        actions::run_action, 
+        helpers::{advance_past_lock, trigger_all_idle_actions, trigger_pre_suspend}, 
+        processes::run_command_detached}, 
+    sdebug,
+    serror,
+    sinfo,
 };
+
+/// Handles the "trigger" command - triggers actions by name
+pub async fn handle_trigger(
+    manager: Arc<tokio::sync::Mutex<Manager>>,
+    action: &str,
+) -> String {
+    if action.is_empty() {
+        serror!("Stasis", "Trigger command missing action name");
+        return "ERROR: No action name provided".to_string();
+    }
+    
+    if action == "all" {
+        return trigger_all(manager).await;
+    }
+    
+    match trigger_action_by_name(manager, action).await {
+        Ok(action_name) => format!("Action '{}' triggered successfully", action_name),
+        Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+async fn trigger_all(manager: Arc<tokio::sync::Mutex<Manager>>) -> String {
+    let mut mgr = manager.lock().await;
+    trigger_all_idle_actions(&mut mgr).await;
+    sdebug!("Stasis", "Triggered all idle actions");
+    "All idle actions triggered".to_string()
+}
 
 /// Helper function to strip ac. or battery. prefix from action names
 fn strip_action_prefix(name: &str) -> &str {
@@ -89,7 +119,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         }
     };
 
-    log_message(&format!("Action triggered via IPC: '{}'", strip_action_prefix(&action.name)));
+    sinfo!("Stasis", "Action triggered via IPC '{}'", strip_action_prefix(&action.name));
     let is_lock = matches!(action.kind, crate::config::model::IdleAction::LockScreen);
 
     if is_lock {
@@ -99,7 +129,7 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
         if uses_loginctl {
             // For loginctl-based locks, just trigger the command
             // The LoginctlLock event will handle the rest
-            log_message("Lock uses loginctl lock-session, triggering it via IPC");
+            sinfo!("Stasis", "Lock uses loginctl lock-session triggering it via IPC");
             if let Err(e) = run_command_detached(&action.command).await {
                 return Err(format!("Failed to trigger lock: {}", e));
             }
@@ -194,22 +224,4 @@ pub async fn trigger_action_by_name(manager: Arc<Mutex<Manager>>, name: &str) ->
     }
 
     Ok(strip_action_prefix(&action.name).to_string())
-}
-
-pub async fn list_available_actions(manager: Arc<Mutex<Manager>>) -> Vec<String> {
-    let mgr = manager.lock().await;
-    let mut actions = mgr
-        .state
-        .power
-        .default_actions
-        .iter()
-        .map(|a| strip_action_prefix(&a.name).to_string())
-        .collect::<Vec<_>>();
-
-    if mgr.state.pre_suspend_command.is_some() {
-        actions.push("pre_suspend".to_string());
-    }
-
-    actions.sort();
-    actions
 }

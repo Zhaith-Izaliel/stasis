@@ -7,8 +7,7 @@ use tokio::sync::Mutex;
 use chrono::{Local, NaiveTime, Timelike};
 
 use crate::{
-    core::manager::Manager,
-    log::log_message,
+    core::manager::Manager, serror, sinfo
 };
 
 pub const PAUSE_HELP_MESSAGE: &str = r#"Pause all timers indefinitely or for a specific duration/time
@@ -209,7 +208,7 @@ async fn pause_for_duration(
         mgr.pause(true).await;
     }
 
-    log_message(&format!("Idle manager paused {}", reason));
+    sinfo!("Stasis", "Idle maanager paused {}", reason);
 
     // Clone for the spawned task
     let reason_clone = reason.clone();
@@ -234,7 +233,7 @@ async fn pause_for_duration(
 
             if mgr.state.inhibitors.active_inhibitor_count == 0 {
                 mgr.state.inhibitors.paused = false;
-                log_message(&format!("Auto-resuming after {}", reason_clone));
+                sinfo!("Stasis", "Auto-resuming after {}", reason_clone);
            
                 // Send notification - manual pause lifted and fully resumed
                 if should_notify {
@@ -244,11 +243,7 @@ async fn pause_for_duration(
                     ).await;
                 }
             } else {
-                log_message(&format!(
-                    "Auto-resume timer expired after {} but {} inhibitor(s) still active - timers remain paused",
-                    reason_clone,
-                    mgr.state.inhibitors.active_inhibitor_count
-                ));
+                sinfo!("Stasis", "Auto-resume timer expired after {} but {} inhibitor(s) still active", reason_clone, mgr.state.inhibitors.active_inhibitor_count);
                 
                 // Send notification - manual pause lifted but still inhibited
                 if should_notify {
@@ -343,7 +338,7 @@ async fn send_notification(summary: &str, body: &str) {
         .arg(body)
         .spawn()
     {
-        log_message(&format!("Failed to send notification: {}", e));
+        serror!("Stasis", "Failed to send notification: {}", e);
     }
 }
 

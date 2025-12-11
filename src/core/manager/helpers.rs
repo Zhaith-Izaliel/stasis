@@ -1,12 +1,8 @@
 use std::time::{Duration, Instant};
 use crate::{
-    config::model::IdleActionBlock, 
-    core::manager::{
-        actions::run_action,
-        processes::{is_process_active, is_process_running, run_command_silent},
-        Manager,
-    },
-    log::{log_debug_message, log_message},
+    config::model::{IdleAction, IdleActionBlock, StasisConfig}, core::manager::{
+        Manager, actions::run_action, processes::{is_process_active, is_process_running, run_command_silent}
+    }, sdebug, serror, sinfo
 };
 
 pub async fn lock_still_active(state: &crate::core::manager::state::ManagerState) -> bool {
@@ -42,20 +38,20 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     };
 
     if actions_to_trigger.is_empty() {
-        log_message("No actions defined to trigger");
+        sinfo!("Stasis", "No actions defined to trigger");
         return;
     }
 
-    log_message(&format!("Triggering all idle actions for '{}'", block_name));
+    sinfo!("Stasis", "Triggering all idle actions for '{}'", block_name);
 
     for action in actions_to_trigger {
         // Skip lockscreen if already locked
         if matches!(action.kind, IdleAction::LockScreen) && mgr.state.lock.is_locked {
-            log_message("Skipping lock action: already locked");
+            sdebug!("Stasis", "Skipping lock action: already locked");
             continue;
         }
 
-        log_message(&format!("Triggering idle action '{}'", action.name));
+        sinfo!("Stasis", "Triggering idle action '{}'", action.name);
         run_action(mgr, &action).await;
     }
 
@@ -73,7 +69,7 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     }
 
     mgr.state.actions.action_index = actions_mut.len().saturating_sub(1);
-    log_message("All idle actions triggered manually");
+    sinfo!("Stasis", "All idle actions triggered");
 }
 
 pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
@@ -90,18 +86,18 @@ pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
 
 pub async fn trigger_pre_suspend(mgr: &mut Manager) {
     if let Some(cmd) = &mgr.state.pre_suspend_command {
-        log_message(&format!("Running pre-suspend command: {}", cmd));
+        sinfo!("Stasis", "Running pre-suspend command: {}", cmd);
 
         // Wait for it to finish (synchronous)
         match run_command_silent(cmd).await {
-            Ok(_) => log_message("Pre-suspend command finished"),
-            Err(e) => log_message(&format!("Pre-suspend command failed: {}", e)),
+            Ok(_) => sinfo!("Stasis", "Pre-suspend command finished"), 
+            Err(e) => serror!("Stasis", "Pre-suspend command failed: {}", e), 
         }
     }
 }
 
 pub async fn advance_past_lock(mgr: &mut Manager) {
-    log_debug_message("Advancing state past lock stage...");
+    sdebug!("Stasis", "Advancing state past lock stage...");
     
     let now = Instant::now();
     mgr.state.lock.post_advanced = true;
@@ -111,14 +107,12 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
     let debounce = if let Some(cfg) = &mgr.state.cfg {
         Duration::from_secs(cfg.debounce_seconds as u64)
     } else {
-        Duration::from_secs(5) // fallback
+        Duration::from_secs(0)
     };
     
-    // Reset timing state
     mgr.state.timing.last_activity = now;
     mgr.state.debounce.main_debounce = Some(now + debounce);
     
-    // Clear last_triggered for all actions
     for actions in [
         &mut mgr.state.power.default_actions,
         &mut mgr.state.power.ac_actions,
@@ -129,7 +123,6 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
         }
     }
     
-    // Determine active block
     let active_block = if !mgr.state.power.ac_actions.is_empty() 
         || !mgr.state.power.battery_actions.is_empty() 
     {
@@ -142,33 +135,67 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
         "default"
     };
     
-    // Get mutable reference to active actions
     let actions = match active_block {
         "ac" => &mut mgr.state.power.ac_actions,
         "battery" => &mut mgr.state.power.battery_actions,
         _ => &mut mgr.state.power.default_actions,
     };
     
-    // Find lock index and advance past it
     if let Some(lock_index) = actions.iter()
         .position(|a| matches!(a.kind, crate::config::model::IdleAction::LockScreen))
     {
         let next_index = lock_index.saturating_add(1);
         mgr.state.actions.action_index = next_index;
         
-        // CRITICAL: Set the next action's last_triggered so timeout calculation works
         if next_index < actions.len() {
             actions[next_index].last_triggered = Some(now);
-            log_debug_message(&format!(
-                "Advanced to action index {} ({}), will fire in {}s",
-                next_index,
-                actions[next_index].name,
-                actions[next_index].timeout
-            ));
+            sdebug!("Stasis", "Advanced to action index {} ({}), will fire in {}s", next_index, actions[next_index].name, actions[next_index].timeout);
         } else {
-            log_debug_message("Advanced past all actions (at end of chain)");
+            sdebug!("Stasis", "Advanced past all actions (at end of sequence)");
         }
     } else {
-        log_debug_message("No lock action found in active block");
+        sdebug!("Stasis", "No lock action found in active block");
     }
 }
+
+pub fn has_lock_action(mgr: &mut Manager) -> bool {
+    let actions = mgr.state.get_active_actions();
+    actions.iter().any(|a| matches!(a.kind, IdleAction::LockScreen))
+}
+
+pub fn get_lock_index(mgr: &mut Manager) -> Option<usize> {
+    let actions = mgr.state.get_active_actions();
+    actions.iter().position(|a| matches!(a.kind, IdleAction::LockScreen))
+}
+
+/// List available profile names
+pub fn list_profiles(mgr: &mut Manager) -> Vec<String> {
+    mgr.state.profile.profile_names()
+}
+
+
+/// Get current profile name (None if using base)
+pub fn current_profile(mgr: &mut Manager) -> Option<String> {
+    mgr.state.profile.active_profile.clone()
+}
+
+pub fn profile_to_stasis_config(profile: &crate::config::model::Profile) -> StasisConfig {
+    
+    StasisConfig {
+        actions: profile.actions.clone(),
+        debounce_seconds: profile.debounce_seconds,
+        inhibit_apps: profile.inhibit_apps.clone(),
+        monitor_media: profile.monitor_media,
+        ignore_remote_media: profile.ignore_remote_media,
+        media_blacklist: profile.media_blacklist.clone(),
+        pre_suspend_command: profile.pre_suspend_command.clone(),
+        respect_wayland_inhibitors: profile.respect_wayland_inhibitors.clone(),
+        lid_close_action: profile.lid_close_action.clone(),
+        lid_open_action: profile.lid_open_action.clone(),
+        notify_on_unpause: profile.notify_on_unpause,
+        notify_before_action: profile.notify_before_action,
+        notify_seconds_before: profile.notify_seconds_before,
+        lock_detection_type: profile.lock_detection_type.clone(),
+    }
+}
+

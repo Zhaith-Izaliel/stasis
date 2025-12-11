@@ -11,16 +11,19 @@ impl StasisConfig {
         app_blocking: Option<bool>,
         media_blocking: Option<bool>,
         media_bridge_active: Option<bool>,
+        active_profile: Option<&str>,
+        available_profiles: Option<&[String]>,
     ) -> String {
         let mut out = String::new();
         
         // Calculate the global pipe position
         // Find the longest label across all sections
-        let status_labels = vec!["Idle Time", "Uptime", "Paused", "Manually Paused", "App Blocking", "Media Blocking", "Media Bridge"];
+        let status_labels = vec!["Idle Time", "Uptime", "Paused", "Manually Paused", 
+                                 "App Blocking", "Media Blocking", "Media Bridge", "Active Profile"];
         let config_labels = vec!["PreSuspendCommand", "MonitorMedia", "IgnoreRemoteMedia", 
                                  "RespectInhibitors", "NotifyOnUnpause", "NotifyBeforeAction",
                                  "NotifySecondsBefore", "DebounceSeconds",
-                                 "LidCloseAction", "LidOpenAction", "InhibitApps"];
+                                 "LidCloseAction", "LidOpenAction", "InhibitApps", "Profiles"];
         let action_labels = vec!["Timeout", "Kind", "Command", "LockCommand", "DetectionType", "Notification", "ResumeCommand"];
         
         let max_label = status_labels.iter()
@@ -32,6 +35,10 @@ impl StasisConfig {
         
         // Status section
         out.push_str("◆ STATUS\n");
+        
+        // Show active profile first
+        let profile_display = active_profile.unwrap_or("base config");
+        out.push_str(&format!("  {:<width$} │ {}\n", "Active Profile", profile_display, width = max_label));
         
         if let Some(idle) = idle_time {
             out.push_str(&format!("  {:<width$} │ {}\n", "Idle Time", utils::format_duration(idle), width = max_label));
@@ -121,6 +128,18 @@ impl StasisConfig {
                 .join(", ")
         };
         out.push_str(&format!("  {:<width$} │ {}\n", "InhibitApps", apps, width = max_label));
+        
+        // List available profiles
+        let profiles_display = if let Some(profiles) = available_profiles {
+            if profiles.is_empty() {
+                "none".to_string()
+            } else {
+                profiles.join(", ")
+            }
+        } else {
+            "none".to_string()
+        };
+        out.push_str(&format!("  {:<width$} │ {}\n", "Profiles", profiles_display, width = max_label));
         
         out.push('\n');
         

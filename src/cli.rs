@@ -33,8 +33,15 @@ pub enum Command {
     #[command(about = "Resume timers after a pause")]
     Resume,
     
-    #[command(about = "List available actions based on current config")]
-    ListActions,
+    #[command(about = "List actions or profiles", disable_help_flag = true)]
+    List {
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Subcommand: 'actions' or 'profiles'"
+        )]
+        args: Vec<String>,
+    },
     
     #[command(about = "Manually trigger a specific idle action by name")]
     Trigger { 
@@ -57,14 +64,12 @@ pub enum Command {
     #[command(about = "Dump recent log lines (for debugging)")]
     Dump {
         #[arg(default_value_t = 20, help = "Number of recent lines to show")]
-        lines: usize, // optional positional argument with default 20
+        lines: usize,
     },
 
-}
-
-impl Command {
-    /// Helper to convert the pause args vec into a single string for IPC
-    pub fn pause_args_to_string(args: &[String]) -> String {
-        args.join(" ")
-    }
+    #[command(about = "Switch to a specific profile or back to base config")]
+    Profile {
+        #[arg(help = "Profile name to activate, or 'none' to use base config")]
+        name: String,
+    },
 }

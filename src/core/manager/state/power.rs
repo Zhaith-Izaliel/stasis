@@ -1,7 +1,7 @@
 use crate::{
     config::model::IdleActionBlock,
-    core::utils::{detect_chassis, ChassisKind},
-    log::log_message,
+    core::utils::{ChassisKind, detect_chassis},
+    sinfo,
 };
 
 #[derive(Debug)]
@@ -110,7 +110,7 @@ impl PowerState {
 
         if new_block != self.current_block {
             let old = std::mem::replace(&mut self.current_block, new_block.clone());
-            log_message(&format!("Switched block: {} → {}", old, new_block));
+            sinfo!("Stasis", "Switched block: {} → {}", old, new_block);
             return true;
         }
 
