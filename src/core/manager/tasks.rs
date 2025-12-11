@@ -1,5 +1,5 @@
 use tokio::task::JoinHandle;
-
+use tokio::time::{timeout, Duration};
 use crate::sinfo;
 
 /// Hard cap on concurrent background tasks.
@@ -11,6 +11,7 @@ pub struct TaskManager {
     pub lock_task_handle: Option<JoinHandle<()>>,
     pub media_task_handle: Option<JoinHandle<()>>,
     pub input_task_handle: Option<JoinHandle<()>>,
+    pub app_inhibitor_task_handle: Option<JoinHandle<()>>,
 }
 
 impl TaskManager {
@@ -21,6 +22,7 @@ impl TaskManager {
             lock_task_handle: None,
             media_task_handle: None,
             input_task_handle: None,
+            app_inhibitor_task_handle: None,
         }
     }
 
@@ -36,7 +38,6 @@ impl TaskManager {
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         Self::cleanup_tasks(&mut self.spawned_tasks);
-
         if self.spawned_tasks.len() < MAX_SPAWNED_TASKS {
             self.spawned_tasks.push(tokio::spawn(fut));
         } else {
@@ -44,12 +45,56 @@ impl TaskManager {
         }
     }
 
-    /// Abort all tasks including optional handles
+    pub async fn shutdown_all(&mut self) {
+        let shutdown_timeout = Duration::from_millis(500);
+
+        // Helper to await with timeout, falling back to abort
+        async fn await_or_abort(handle: JoinHandle<()>, name: &str, shutdown_timeout: Duration) {
+            match timeout(shutdown_timeout, handle).await {
+                Ok(Ok(())) => {
+                    // Task finished cleanly
+                }
+                Ok(Err(e)) => {
+                    sinfo!("Stasis", "{} task panicked: {}", name, e);
+                }
+                Err(_) => {
+                    sinfo!("Stasis", "{} task didn't finish in time, aborting", name);
+                    // Note: handle was consumed by timeout, already dropped
+                }
+            }
+        }
+
+        // Await all tracked tasks
+        if let Some(handle) = self.idle_task_handle.take() {
+            await_or_abort(handle, "Idle", shutdown_timeout).await;
+        }
+        if let Some(handle) = self.lock_task_handle.take() {
+            await_or_abort(handle, "Lock watcher", shutdown_timeout).await;
+        }
+        if let Some(handle) = self.media_task_handle.take() {
+            await_or_abort(handle, "Media monitor", shutdown_timeout).await;
+        }
+        if let Some(handle) = self.input_task_handle.take() {
+            await_or_abort(handle, "Input", shutdown_timeout).await;
+        }
+        if let Some(handle) = self.app_inhibitor_task_handle.take() {
+            await_or_abort(handle, "App inhibitor", shutdown_timeout).await;
+        }
+
+        // Await spawned tasks
+        for handle in self.spawned_tasks.drain(..) {
+            let _ = timeout(shutdown_timeout, handle).await;
+        }
+    }
+
+    /// This is kept for emergency abort if needed
     pub fn abort_all(&mut self) {
         if let Some(handle) = self.idle_task_handle.take() { handle.abort(); }
         if let Some(handle) = self.lock_task_handle.take() { handle.abort(); }
         if let Some(handle) = self.media_task_handle.take() { handle.abort(); }
-
+        if let Some(handle) = self.input_task_handle.take() { handle.abort(); }
+        if let Some(handle) = self.app_inhibitor_task_handle.take() { handle.abort(); }
+        
         for handle in self.spawned_tasks.drain(..) {
             handle.abort();
         }
@@ -68,12 +113,9 @@ where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     cleanup_tasks(tasks);
-
     if tasks.len() < MAX_SPAWNED_TASKS {
         tasks.push(tokio::spawn(fut));
     } else {
         sinfo!("Stasis", "Max spawned tasks reached, skipping task spawn");
     }
 }
-
-

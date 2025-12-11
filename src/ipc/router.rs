@@ -49,7 +49,6 @@ pub async fn route_command(
         // Info
         "info" | "info --json" => {
             let as_json = cmd.contains("--json");
-            // ✅ Only pass manager - reads state from manager.state.inhibitors
             info::handle_info(manager, as_json).await
         }
         

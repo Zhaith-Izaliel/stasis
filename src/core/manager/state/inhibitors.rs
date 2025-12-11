@@ -8,7 +8,6 @@ pub struct InhibitorState {
     pub manually_paused: bool,
     pub paused: bool,
     pub compositor_managed: bool,
-    /// Apps to monitor for inhibition (updated when config changes)
     pub inhibit_apps: Vec<AppInhibitPattern>,
 }
 

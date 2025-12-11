@@ -431,7 +431,7 @@ end`;
       
       <p>
         <b>3:</b> Later on this page when configuring your actions, make sure to configure the <code>notification</code> option so that Your
-        notification appears for that configuration
+        notification appears for that action block
       </p>
     </section>
     

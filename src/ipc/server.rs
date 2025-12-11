@@ -59,7 +59,6 @@ async fn handle_connection(
         sdebug!("Stasis", "Received IPC command: {}", cmd);
     }
     
-    // ✅ Only pass manager - all state including inhibit_apps is in manager.state
     let response = route_command(&cmd, manager).await;
     
     stream.write_all(response.as_bytes()).await?;

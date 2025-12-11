@@ -484,7 +484,7 @@ impl Manager {
 
     pub async fn shutdown(&mut self) {
         self.state.shutdown_flag.notify_waiters();
-        sleep(Duration::from_millis(200)).await;
-        self.tasks.abort_all();
+        sleep(Duration::from_millis(100)).await;
+        self.tasks.shutdown_all().await;
     }
 }

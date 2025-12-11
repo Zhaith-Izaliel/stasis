@@ -11,7 +11,7 @@ use crate::{
     SOCKET_PATH, config::parser::load_combined_config, core::{
         manager::{Manager, idle_loops::{spawn_idle_task, spawn_lock_watcher}},
         services::{
-            app_inhibit::{AppInhibitor, spawn_app_inhibit_task}, 
+            app_inhibit::spawn_app_inhibit_task, 
             browser_media::spawn_browser_bridge_detector, 
             dbus::listen_for_power_events, 
             input::spawn_input_task, 
@@ -70,10 +70,11 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
         mgr.trigger_instant_actions().await;
     }
     
-    // Spawn app inhibit task
-    let app_inhibitor = spawn_app_inhibit_task(
-        Arc::clone(&manager),
-    ).await;
+    {
+        let app_inhibitor_handle = spawn_app_inhibit_task(Arc::clone(&manager)).await;
+        let mut mgr = manager.lock().await;
+        mgr.tasks.app_inhibitor_task_handle = Some(app_inhibitor_handle);
+    }
    
     // Spawn media monitors
     if cfg.monitor_media {
@@ -96,16 +97,9 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
         listener,
     ).await;
 
-    setup_shutdown_handler(
-        Arc::clone(&manager),
-        Arc::clone(&app_inhibitor),
-    ).await;
-
-    // Monitor Wayland compositor connection loop (cleanly exit Stasis when Wayland dies)
-    spawn_wayland_monitor(
-        Arc::clone(&manager),
-        Arc::clone(&app_inhibitor),
-    ).await;
+    // Shutdown watcher loops
+    setup_shutdown_handler(Arc::clone(&manager)).await;
+    spawn_wayland_monitor(Arc::clone(&manager)).await;
     
     // Log startup message
     sinfo!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len());
@@ -121,16 +115,14 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
 
 /// Async shutdown handler (Ctrl+C / SIGTERM)
 async fn setup_shutdown_handler(
-    idle_timer: Arc<Mutex<Manager>>,
-    app_inhibitor: Arc<Mutex<AppInhibitor>>,
+    manager: Arc<Mutex<Manager>>,
 ) {
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).unwrap();
 
     tokio::spawn({
-        let manager = Arc::clone(&idle_timer);
-        let app_inhibitor = Arc::clone(&app_inhibitor);
+        let manager = Arc::clone(&manager);
         async move {
             tokio::select! {
                 _ = sigint.recv() => {
@@ -140,15 +132,11 @@ async fn setup_shutdown_handler(
                     sinfo!("Stasis", "Received SIGTERM, shutting down...");
                 },
                 _ = sighup.recv() => {
-                    sinfo!("Stasis", "Received SIGHUB, shutting down...");
+                    sinfo!("Stasis", "Received SIGHUP, shutting down...");
                 },
             }
 
-            // Shutdown idle timer
             manager.lock().await.shutdown().await;
-
-            // Shutdown app inhibitor
-            app_inhibitor.lock().await.shutdown().await;
 
             let _ = std::fs::remove_file(SOCKET_PATH);
             sinfo!("Stasis", "Shutdown complete, goodbye!");
@@ -157,9 +145,9 @@ async fn setup_shutdown_handler(
     });
 }
 
+// Watches for wayland socket being dead and stops Stasis
 async fn spawn_wayland_monitor(
     manager: Arc<Mutex<Manager>>,
-    app_inhibitor: Arc<Mutex<AppInhibitor>>,
 ) {
     use tokio::net::UnixStream;
     
@@ -179,11 +167,7 @@ async fn spawn_wayland_monitor(
             if UnixStream::connect(&socket_path).await.is_err() {
                 sinfo!("Stasis", "Wayland compositor is no longer responding, shutting down...");
 
-                // Shutdown idle timer
                 manager.lock().await.shutdown().await;
-
-                // Shutdown app inhibitor
-                app_inhibitor.lock().await.shutdown().await;
 
                 let _ = std::fs::remove_file(SOCKET_PATH);
                 sinfo!("Stasis", "Shutdown complete, goodbye!");
