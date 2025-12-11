@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
+use crate::core::manager::inhibitors::InhibitorSource;
 use crate::core::manager::{
     inhibitors::{incr_active_inhibitor, decr_active_inhibitor},
     Manager
@@ -18,7 +19,6 @@ pub fn is_bridge_available() -> bool {
 pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
     let manager_clone = Arc::clone(&manager);
     
-    // ✅ Start the browser monitor ONCE at startup (it handles monitoring state internally)
     spawn_browser_media_monitor(Arc::clone(&manager_clone)).await;
     
     tokio::spawn(async move {
@@ -64,7 +64,6 @@ pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
                     
                     let is_available = is_bridge_available();
                     
-                    // ✅ Just toggle the active flag based on availability AND monitoring state
                     if monitor_enabled && is_available && !was_available {
                         sinfo!("Stasis", "Browser bridge now available, activating");
                         activate_browser_monitor(Arc::clone(&manager_clone)).await;
@@ -103,7 +102,7 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
         
         if !non_ff_playing {
             sinfo!("Stasis", "Clearing MPRIS inhibitors (Firefox transitioning to bridge)");
-            decr_active_inhibitor(&mut mgr).await;
+            decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
             mgr.state.media.mpris_media_playing = false;
         }
     }
@@ -116,10 +115,6 @@ async fn deactivate_browser_monitor(manager: Arc<Mutex<Manager>>) {
     let mut mgr = manager.lock().await;
     mgr.state.media.media_bridge_active = false;
 }
-
-/// ✅ Remove stop_browser_monitor - no longer needed
-/// The monitor handles cleanup internally when it sees monitoring is disabled
-
 
 async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
     // Don't check if already active - just spawn fresh
@@ -137,14 +132,12 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
        
         sinfo!("Media Bridge", "Browser media monitor started");
         
-        // ✅ Get shutdown flag
         let shutdown = {
             let mgr = manager.lock().await;
             mgr.state.shutdown_flag.clone()
         };
         
         loop {
-            // ✅ Select between shutdown and normal polling
             tokio::select! {
                 _ = shutdown.notified() => {
                     sinfo!("Media Bridge", "Browser media monitor shutting down...");
@@ -152,14 +145,12 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                 }
                 
                 _ = poll_interval.tick() => {
-                    // ✅ Check if monitoring is enabled
                     let (monitor_enabled, bridge_active) = {
                         let mgr = manager.lock().await;
                         let enabled = mgr.state.cfg.as_ref().map(|c| c.monitor_media).unwrap_or(true);
                         (enabled, mgr.state.media.media_bridge_active)
                     };
                     
-                    // ✅ If monitoring was just disabled, clean up
                     if !monitor_enabled && was_monitoring {
                         sinfo!("Media Bridge", "Media monitoring disabled, cleaning up state");
                         
@@ -168,7 +159,7 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                         
                         if prev_tab_count > 0 {
                             for _ in 0..prev_tab_count {
-                                decr_active_inhibitor(&mut mgr).await;
+                                decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
                             }
                         }
                         
@@ -251,11 +242,11 @@ async fn update_manager_state(
 
     if delta > 0 {
         for _ in 0..delta {
-            incr_active_inhibitor(&mut mgr).await;
+            incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         }
     } else if delta < 0 {
         for _ in 0..delta.abs() {
-            decr_active_inhibitor(&mut mgr).await;
+            decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         }
     }
 

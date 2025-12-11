@@ -21,6 +21,7 @@ use crate::{
         actions::run_action,
         brightness::restore_brightness,
         helpers::{profile_to_stasis_config, has_lock_action, get_lock_index},
+        inhibitors::{incr_active_inhibitor, InhibitorSource},
         processes::{is_process_running, run_command_detached},
         tasks::TaskManager,
     },
@@ -29,6 +30,7 @@ use crate::{
     serror,
 };
 
+#[derive(Debug)]
 pub struct Manager {
     pub state: ManagerState,
     pub tasks: TaskManager,
@@ -414,62 +416,81 @@ impl Manager {
         min_time
     } 
 
-    pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
-        let profile_name_opt = profile_name.map(|s| s.to_string());
-        
-        // Check if profile exists (if not "none")
-        if let Some(name) = &profile_name_opt {
-            if !self.state.profile.has_profile(name) {
-                return Err(format!("Profile '{}' not found", name));
-            }
+
+pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
+    let profile_name_opt = profile_name.map(|s| s.to_string());
+
+    // Check if profile exists
+    if let Some(name) = &profile_name_opt {
+        if !self.state.profile.has_profile(name) {
+            return Err(format!("Profile '{}' not found", name));
         }
-        
-        let old_monitor_media = self.state.cfg
-            .as_ref()
-            .map(|c| c.monitor_media)
-            .unwrap_or(true);
-        
-        // Get the profile or fall back to base config
-        let config_to_apply = if let Some(name) = &profile_name_opt {
-            let profile = self.state.profile.get_profile(name)
-                .ok_or_else(|| format!("Profile '{}' not found", name))?;
-            
-            // Convert profile to StasisConfig
-            profile_to_stasis_config(profile)
-        } else {
-            // Use base config - need to reload from file
-            match crate::config::parser::load_combined_config() {
-                Ok(combined) => combined.base,
-                Err(e) => return Err(format!("Failed to load base config: {}", e)),
-            }
-        };
-        
-        let new_monitor_media = config_to_apply.monitor_media;
-        
-        if old_monitor_media && !new_monitor_media {
-            sdebug!("Stasis", "Profile switch disabling media monitoring");
-            self.cleanup_media_monitoring().await;
-        }
-        
-        // Apply the config
-        self.state.update_from_config(&config_to_apply).await;
-        
-        // Update active profile tracking
-        self.state.profile.set_active(profile_name_opt.clone());
-        
-        if new_monitor_media && !old_monitor_media {
-            sdebug!("Stasis", "Profile switch enabling media monitoring");
-            // Media monitoring is handled by the always-running tasks that check config
-            // No need to restart here - they'll see the config change
-        }
-        
-        // Return success message
-        Ok(if let Some(name) = profile_name_opt {
-            format!("Switched to profile: {}", name)
-        } else {
-            "Switched to base configuration".to_string()
-        })
     }
+
+    // Load profile or base config
+    let config_to_apply = if let Some(name) = &profile_name_opt {
+        let profile = self.state.profile.get_profile(name)
+            .ok_or_else(|| format!("Profile '{}' not found", name))?;
+        profile_to_stasis_config(profile)
+    } else {
+        crate::config::parser::load_combined_config()
+            .map(|combined| combined.base)
+            .map_err(|e| format!("Failed to load base config: {}", e))?
+    };
+
+    // Refresh app inhibitors
+    self.state
+        .inhibitors
+        .refresh_from_profile(config_to_apply.inhibit_apps.clone());
+
+    if let Some(app_inhibitor) = &self.state.app.app_inhibitor {
+        app_inhibitor.lock().await.reset_inhibitors().await;
+    }
+
+    // Apply the config
+    self.state.update_from_config(&config_to_apply).await;
+
+    // Update active profile tracking
+    self.state.profile.set_active(profile_name_opt.clone());
+
+    // --------------------------
+    // ✅ Media handling respecting profile
+    // --------------------------
+    if config_to_apply.monitor_media {
+        // Only stop existing media if monitoring is enabled
+        self.cleanup_media_monitoring().await;
+
+        // One-shot immediate check
+        let (ignore_remote, media_blacklist) = (
+            config_to_apply.ignore_remote_media,
+            config_to_apply.media_blacklist.clone(),
+        );
+
+        let playing = crate::core::services::media::check_media_playing(
+            ignore_remote,
+            &media_blacklist,
+            self.state.media.media_bridge_active,
+        );
+
+        if playing {
+            self.state.media.media_playing = true;
+            self.state.media.media_blocking = true;
+            self.state.media.mpris_media_playing = true;
+            incr_active_inhibitor(self, InhibitorSource::Media).await;
+        }
+    } else {
+        // Monitoring disabled → force-stop any running media inhibitors
+        self.cleanup_media_monitoring().await;
+    }
+
+    Ok(if let Some(name) = profile_name_opt {
+        format!("Switched to profile: {}", name)
+    } else {
+        "Switched to base configuration".to_string()
+    })
+}
+
+
  
     pub async fn pause(&mut self, manual: bool) {
         if manual {

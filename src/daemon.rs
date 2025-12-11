@@ -71,9 +71,10 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     }
     
     {
-        let app_inhibitor_handle = spawn_app_inhibit_task(Arc::clone(&manager)).await;
-        let mut mgr = manager.lock().await;
-        mgr.tasks.app_inhibitor_task_handle = Some(app_inhibitor_handle);
+        let (app_inhibitor, app_inhibitor_handle) = spawn_app_inhibit_task(Arc::clone(&manager)).await;
+        let mut mgr_guard = manager.lock().await;
+        mgr_guard.tasks.app_inhibitor_task_handle = Some(app_inhibitor_handle);
+        mgr_guard.state.app.attach_inhibitor(app_inhibitor);
     }
    
     // Spawn media monitors

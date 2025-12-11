@@ -6,7 +6,7 @@ use tokio::task;
 use zbus::{Connection, MatchRule, MessageStream};
 
 use crate::{core::manager::{
-    Manager, inhibitors::{decr_active_inhibitor, incr_active_inhibitor}
+    Manager, inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor}
 }, sdebug, serror, sinfo};
 
 // Players that are always considered local (browsers, local video players)
@@ -82,7 +82,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     let mut mgr = manager.lock().await;
                     if !mgr.state.media.mpris_media_playing {
                         sinfo!("MPRIS", "Initial check: media playing");
-                        incr_active_inhibitor(&mut mgr).await;
+                        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
                         mgr.state.media.mpris_media_playing = true;
                         mgr.state.media.media_playing = true;
                         mgr.state.media.media_blocking = true;
@@ -143,7 +143,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     
                     if any_playing && !mgr.state.media.mpris_media_playing {
                         sdebug!("MPRIS", "Media started");
-                        incr_active_inhibitor(&mut mgr).await;
+                        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
                         mgr.state.media.mpris_media_playing = true;
                     } else if !any_playing && mgr.state.media.mpris_media_playing {
                         if !bridge_active && has_playerctl_players() && has_any_media_playing() {
@@ -151,7 +151,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                         }
                        
                         sdebug!("MPRIS", "Media stopped");
-                        decr_active_inhibitor(&mut mgr).await;
+                        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
                         mgr.state.media.mpris_media_playing = false;
                     }
                     

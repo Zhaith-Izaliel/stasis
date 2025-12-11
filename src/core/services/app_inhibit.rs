@@ -5,15 +5,17 @@ use tokio::task::JoinHandle;
 use serde_json::Value;
 use procfs::process::all_processes;
 
-use crate::core::manager::inhibitors::{decr_active_inhibitor, incr_active_inhibitor};
+use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor};
 use crate::core::manager::Manager;
 use crate::{sdebug, sinfo};
 
 /// Tracks currently running apps to inhibit idle
+#[derive(Debug)]
 pub struct AppInhibitor {
-    active_apps: HashSet<String>,
-    desktop: String,
-    manager: Arc<Mutex<Manager>>,
+    pub active_apps: HashSet<String>,
+    pub desktop: String,
+    pub manager: Arc<Mutex<Manager>>,
+    pub inhibitor_active: bool, // moved here for persistent state
 }
 
 impl AppInhibitor {
@@ -28,10 +30,37 @@ impl AppInhibitor {
             active_apps: HashSet::new(),
             desktop,
             manager,
+            inhibitor_active: false,
         }
     }
 
+    pub fn clear_active_apps(&mut self) {
+        self.active_apps.clear();
+        self.inhibitor_active = false; // reset on profile change
+    }
+
+    pub async fn reset_inhibitors(&mut self) {
+        // Only decrement if we were previously active
+        if self.inhibitor_active {
+            let mut mgr = self.manager.lock().await;
+            decr_active_inhibitor(&mut mgr, InhibitorSource::App).await;
+        }
+
+        // Clear current state
+        self.active_apps.clear();
+        self.inhibitor_active = false;
+    }
+
     pub async fn is_any_app_running(&mut self) -> bool {
+        // If no apps configured, reset immediately
+        {
+            let mgr = self.manager.lock().await;
+            if mgr.state.inhibitors.inhibit_apps.is_empty() {
+                self.active_apps.clear();
+                return false;
+            }
+        }
+
         let mut new_active_apps = HashSet::new();
 
         let running = match self.check_compositor_windows().await {
@@ -93,8 +122,8 @@ impl AppInhibitor {
         }
 
         any_running
-    }    
-    
+    }
+
     async fn check_compositor_windows(&self) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
         match self.desktop.as_str() {
             "niri" => {
@@ -175,32 +204,31 @@ impl AppInhibitor {
 /// Spawns the app inhibitor background task and returns its JoinHandle
 pub async fn spawn_app_inhibit_task(
     manager: Arc<Mutex<Manager>>,
-) -> JoinHandle<()> {
-    // Check if any apps are configured by reading from manager state
+) -> (Arc<Mutex<AppInhibitor>>, JoinHandle<()>) {
     let has_apps = {
         let mgr = manager.lock().await;
         !mgr.state.inhibitors.inhibit_apps.is_empty()
     };
 
+    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
+
     if !has_apps {
         sinfo!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
-        return tokio::spawn(async move {
-            // Still need to listen for shutdown even when sleeping
-            let shutdown = {
-                let mgr = manager.lock().await;
-                mgr.state.shutdown_flag.clone()
-            };
+        let inhibitor_clone = Arc::clone(&inhibitor);
+        let handle = tokio::spawn(async move {
+            let inhibitor_guard = inhibitor_clone.lock().await;
+            let manager_guard = inhibitor_guard.manager.lock().await;
+            let shutdown = manager_guard.state.shutdown_flag.clone();
+
             shutdown.notified().await;
             sinfo!("Stasis", "App inhibitor shutting down...");
         });
+        return (inhibitor, handle);
     }
 
-    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
     let inhibitor_clone = Arc::clone(&inhibitor);
 
-    tokio::spawn(async move {
-        let mut inhibitor_active = false;
-
+    let handle = tokio::spawn(async move {
         loop {
             let shutdown = {
                 let guard = inhibitor_clone.lock().await;
@@ -219,22 +247,29 @@ pub async fn spawn_app_inhibit_task(
                         guard.is_any_app_running().await
                     };
 
-                    if running && !inhibitor_active {
-                        // App started inhibiting
-                        let guard = inhibitor_clone.lock().await;
+                    let mut guard = inhibitor_clone.lock().await;
+                    {
                         let mut mgr = guard.manager.lock().await;
-                        incr_active_inhibitor(&mut mgr).await;
-                        inhibitor_active = true;
-                    } else if !running && inhibitor_active {
-                        // All apps stopped inhibiting
-                        let guard = inhibitor_clone.lock().await;
-                        let mut mgr = guard.manager.lock().await;
-                        decr_active_inhibitor(&mut mgr).await;
-                        inhibitor_active = false;
+
+                        if running && !guard.inhibitor_active {
+                            incr_active_inhibitor(&mut mgr, InhibitorSource::App).await;
+                        } else if (!running && guard.inhibitor_active) || (mgr.state.inhibitors.inhibit_apps.is_empty() && guard.inhibitor_active) {
+                            decr_active_inhibitor(&mut mgr, InhibitorSource::App).await;
+                        }
+                    } // <- mgr lock is dropped here
+
+                    // Now it's safe to mutate guard.inhibitor_active
+                    if running {
+                        guard.inhibitor_active = true;
+                    } else {
+                        guard.inhibitor_active = false;
                     }
                 }
+
             }
         }
-    })
+    });
+
+    (inhibitor, handle)
 }
 

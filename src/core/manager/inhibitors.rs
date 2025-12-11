@@ -1,10 +1,28 @@
 use crate::core::manager::Manager;
 use crate::sdebug;
 
-pub async fn incr_active_inhibitor(mgr: &mut Manager) {
-    let prev = mgr.state.inhibitors.active_inhibitor_count;
-    mgr.state.inhibitors.active_inhibitor_count = prev.saturating_add(1);
+/// Tracks active inhibitors from different sources (apps, media, etc.)
+/// Still maintains `active_inhibitor_count` for backward compatibility/logging
+impl Manager {
+    /// Recalculate total active inhibitors from individual sources
+    fn update_total_inhibitors(&mut self) {
+        let total = self.state.inhibitors.active_app_inhibitors
+            + self.state.inhibitors.active_media_inhibitors;
+        self.state.inhibitors.active_inhibitor_count = total;
+    }
+}
+
+/// Increment an app or media inhibitor
+pub async fn incr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
+    match source {
+        InhibitorSource::App => mgr.state.inhibitors.active_app_inhibitors += 1,
+        InhibitorSource::Media => mgr.state.inhibitors.active_media_inhibitors += 1,
+    }
+
+    // Update global count for logging/compatibility
+    mgr.update_total_inhibitors();
     let now = mgr.state.inhibitors.active_inhibitor_count;
+    let prev = now.saturating_sub(1);
 
     if prev == 0 {
         if !mgr.state.inhibitors.manually_paused {
@@ -32,23 +50,31 @@ pub async fn incr_active_inhibitor(mgr: &mut Manager) {
         );
     }
 
-    // wake idle task so it can recalc next timeout (if needed)
+    // Wake idle task to recalc next timeout
     mgr.state.notify.notify_one();
 }
 
-pub async fn decr_active_inhibitor(mgr: &mut Manager) {
-    let prev = mgr.state.inhibitors.active_inhibitor_count;
+/// Decrement an app or media inhibitor
+pub async fn decr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
+    let source_count = match source {
+        InhibitorSource::App => &mut mgr.state.inhibitors.active_app_inhibitors,
+        InhibitorSource::Media => &mut mgr.state.inhibitors.active_media_inhibitors,
+    };
 
-    if prev == 0 {
+    if *source_count == 0 {
         sdebug!(
             "Inhibitors",
-            "decr_active_inhibitor called but count already 0 (possible mismatch)"
+            "decr_active_inhibitor called for {:?} but count already 0 (possible mismatch)",
+            source
         );
         return;
     }
 
-    mgr.state.inhibitors.active_inhibitor_count = prev.saturating_sub(1);
+    *source_count = source_count.saturating_sub(1);
+    mgr.update_total_inhibitors();
+
     let now = mgr.state.inhibitors.active_inhibitor_count;
+    let prev = now + 1;
 
     if now == 0 {
         if !mgr.state.inhibitors.manually_paused {
@@ -70,7 +96,6 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager) {
             );
         }
 
-        // wake idle task so timeouts will be recalculated right away
         mgr.state.notify.notify_one();
     } else {
         sdebug!(
@@ -80,4 +105,11 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager) {
             now
         );
     }
+}
+
+/// Source of inhibitor (app or media)
+#[derive(Debug, Copy, Clone)]
+pub enum InhibitorSource {
+    App,
+    Media,
 }

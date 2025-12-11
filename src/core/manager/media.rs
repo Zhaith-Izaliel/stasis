@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     core::manager::{
-        Manager, inhibitors::{decr_active_inhibitor, incr_active_inhibitor}, state::media::MediaState
+        Manager, inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor}, state::media::MediaState
     }, sdebug, serror, sinfo
 };
 
@@ -26,10 +26,10 @@ impl Manager {
         // Only change state via the helpers so behaviour stays consistent
         if playing && !self.state.media.media_playing {
             // Call the same helper the monitor uses
-            incr_active_inhibitor(self).await;
+            incr_active_inhibitor(self, InhibitorSource::Media).await;
             self.state.media.media_playing = true;
         } else if !playing && self.state.media.media_playing {
-            decr_active_inhibitor(self).await;
+            decr_active_inhibitor(self, InhibitorSource::Media).await;
             self.state.media.media_playing = false;
         }
     }
@@ -62,13 +62,13 @@ impl Manager {
 
         // Clear standard media inhibitor
         if self.state.media.media_playing {
-            decr_active_inhibitor(self).await;
+            decr_active_inhibitor(self, InhibitorSource::Media).await;
         }
 
         // Clear browser tab inhibitors
         let tab_count = self.state.media.browser_playing_tab_count;
         for _ in 0..tab_count {
-            decr_active_inhibitor(self).await;
+            decr_active_inhibitor(self, InhibitorSource::Media).await;
         }
 
         // Reset media state

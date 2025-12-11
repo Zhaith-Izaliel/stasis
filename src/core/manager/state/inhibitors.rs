@@ -4,6 +4,8 @@ use crate::config::model::AppInhibitPattern;
 #[derive(Debug)]
 pub struct InhibitorState {
     pub active_inhibitor_count: u32,
+    pub active_app_inhibitors: u32,
+    pub active_media_inhibitors: u32,
     pub dbus_inhibit_active: bool,
     pub manually_paused: bool,
     pub paused: bool,
@@ -15,6 +17,8 @@ impl Default for InhibitorState {
     fn default() -> Self {
         Self {
             active_inhibitor_count: 0,
+            active_app_inhibitors: 0,
+            active_media_inhibitors: 0,
             dbus_inhibit_active: false,
             manually_paused: false,
             paused: false,
@@ -31,5 +35,15 @@ impl InhibitorState {
     
     pub fn total_count(&self) -> u32 {
         self.active_inhibitor_count
+    }
+
+    pub fn refresh_from_profile(&mut self, patterns: Vec<AppInhibitPattern>) {
+        // Update patterns
+        self.inhibit_apps = patterns;
+
+        // Reset state related to the old profile
+        self.active_inhibitor_count = 0;
+        self.paused = false;
+        self.manually_paused = false;
     }
 }

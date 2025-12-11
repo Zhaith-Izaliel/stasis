@@ -5,6 +5,7 @@ use crate::sinfo;
 /// Hard cap on concurrent background tasks.
 const MAX_SPAWNED_TASKS: usize = 10;
 
+#[derive(Debug)]
 pub struct TaskManager {
     pub spawned_tasks: Vec<JoinHandle<()>>,
     pub idle_task_handle: Option<JoinHandle<()>>,

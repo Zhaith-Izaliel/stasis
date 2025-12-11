@@ -1,3 +1,4 @@
+pub mod app;
 pub mod actions;
 pub mod brightness;
 pub mod debounce;
@@ -15,6 +16,7 @@ use tokio::sync::Notify;
 use crate::{
     config::model::{CombinedConfig, IdleActionBlock, StasisConfig},
     core::manager::state::{
+        app::AppState,
         actions::ActionState, 
         brightness::BrightnessState, 
         debounce::DebounceState, 
@@ -30,6 +32,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ManagerState {
+    pub app: AppState,
     pub actions: ActionState,
     pub brightness: BrightnessState,
     pub cfg: Option<Arc<StasisConfig>>,
@@ -51,6 +54,7 @@ pub struct ManagerState {
 impl Default for ManagerState {
     fn default() -> Self {
         Self {
+            app: AppState::default(),
             actions: ActionState::default(),
             brightness: BrightnessState::default(),
             cfg: None,
@@ -80,6 +84,7 @@ impl ManagerState {
         inhibitors.inhibit_apps = cfg.inhibit_apps.clone();
         
         Self {
+            app: AppState::default(),
             actions: ActionState::default(),
             brightness: BrightnessState::default(),
             cfg: Some(cfg.clone()),
