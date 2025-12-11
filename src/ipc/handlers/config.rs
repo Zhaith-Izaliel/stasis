@@ -3,11 +3,12 @@ use tokio::time::Duration;
 use crate::{
     config::{self, model::CombinedConfig},
     core::{
-        manager::{Manager, helpers::{current_profile, list_profiles}},
+        manager::Manager,
         services::app_inhibit::AppInhibitor
     },
     sdebug, serror, sinfo,
 };
+use super::state_info::{collect_full_state, format_text_response};
 
 /// Handles the "reload" command - reloads configuration from disk
 pub async fn handle_reload(
@@ -61,7 +62,7 @@ async fn reload_config_internal(
     }
     
     // Get current state for response
-    let state_info = collect_state_info(Arc::clone(&manager), Arc::clone(&app_inhibitor)).await;
+    let state_info = collect_full_state(Arc::clone(&manager), Arc::clone(&app_inhibitor)).await;
     
     // Update app inhibitor
     {
@@ -71,7 +72,7 @@ async fn reload_config_internal(
     
     sdebug!("Stasis", "Config reloaded successfully");
     
-    format_reload_response(state_info)
+    format_text_response(&state_info, Some("Config reloaded successfully"))
 }
 
 async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
@@ -98,86 +99,4 @@ async fn restart_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
     let mut mgr = manager.lock().await;
     mgr.recheck_media().await;
     mgr.trigger_instant_actions().await;
-}
-
-struct StateInfo {
-    idle_time: Duration,
-    uptime: Duration,
-    manually_inhibited: bool,
-    paused: bool,
-    media_blocking: bool,
-    media_bridge_active: bool,
-    app_blocking: bool,
-    cfg: Option<Arc<crate::config::model::StasisConfig>>,
-    profile: Option<String>,
-    available_profiles: Vec<String>,
-}
-
-async fn collect_state_info(
-    manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
-) -> StateInfo {
-    let (idle_time, uptime, manually_inhibited, paused, media_blocking, 
-         media_bridge_active, cfg, profile, available_profiles) = {
-        let mut mgr = manager.lock().await;
-        (
-            mgr.state.timing.last_activity.elapsed(),
-            mgr.state.timing.start_time.elapsed(),
-            mgr.state.inhibitors.manually_paused,
-            mgr.state.inhibitors.paused,
-            mgr.state.media.media_blocking,
-            mgr.state.media.media_bridge_active,
-            mgr.state.cfg.clone(),
-            current_profile(&mut mgr),
-            list_profiles(&mut mgr)
-        )
-    };
-    
-    let app_blocking = tokio::time::timeout(
-        Duration::from_millis(100),
-        async {
-            let mut inhibitor = app_inhibitor.lock().await;
-            inhibitor.is_any_app_running().await
-        }
-    ).await.unwrap_or(false);
-    
-    StateInfo {
-        idle_time,
-        uptime,
-        manually_inhibited,
-        paused,
-        media_blocking,
-        media_bridge_active,
-        app_blocking,
-        cfg,
-        profile,
-        available_profiles,
-    }
-}
-
-fn format_reload_response(info: StateInfo) -> String {
-    if let Some(cfg) = &info.cfg {
-        let profiles = if info.available_profiles.is_empty() {
-            None
-        } else {
-            Some(info.available_profiles.as_slice())
-        };
-        
-        format!(
-            "Config reloaded successfully\n\n{}",
-            cfg.pretty_print(
-                Some(info.idle_time),
-                Some(info.uptime),
-                Some(info.paused),
-                Some(info.manually_inhibited),
-                Some(info.app_blocking),
-                Some(info.media_blocking),
-                Some(info.media_bridge_active),
-                info.profile.as_deref(),
-                profiles
-            )
-        )
-    } else {
-        "Config reloaded successfully".to_string()
-    }
 }

@@ -23,6 +23,7 @@ pub async fn route_command(
             let args = cmd.strip_prefix("pause").unwrap_or("").trim();
             pause_resume::handle_pause(manager, args).await
         }
+
         "resume" => pause_resume::handle_resume(manager).await,
         
         // List

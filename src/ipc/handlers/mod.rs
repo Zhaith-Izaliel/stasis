@@ -5,4 +5,5 @@ pub mod list;
 pub mod pause_resume;
 pub mod pause;
 pub mod profile;
+pub mod state_info;
 pub mod trigger;

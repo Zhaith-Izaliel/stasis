@@ -3,6 +3,7 @@ use crate::{
     core::manager::Manager,
     serror, sinfo,
 };
+use super::state_info::{collect_manager_state, format_text_response};
 
 /// Handles the "profile" command - switches between profiles
 pub async fn handle_profile(
@@ -30,7 +31,10 @@ pub async fn handle_profile(
                 profile_name.unwrap_or("base config")
             );
             mgr.trigger_instant_actions().await;
-            msg
+            
+            // Collect state and format response
+            let state_info = collect_manager_state(&mut mgr);
+            format_text_response(&state_info, Some(&msg))
         }
         Err(e) => {
             serror!("Stasis", "Failed to set profile: {}", e);
