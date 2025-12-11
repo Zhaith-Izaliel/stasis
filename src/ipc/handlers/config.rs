@@ -2,10 +2,7 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use crate::{
     config::{self, model::CombinedConfig},
-    core::{
-        manager::Manager,
-        services::app_inhibit::AppInhibitor
-    },
+    core::manager::Manager,
     sdebug, serror, sinfo,
 };
 use super::state_info::{collect_full_state, format_text_response};
@@ -13,11 +10,10 @@ use super::state_info::{collect_full_state, format_text_response};
 /// Handles the "reload" command - reloads configuration from disk
 pub async fn handle_reload(
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
 ) -> String {
     match config::parser::load_combined_config() {
         Ok(combined) => {
-            reload_config_internal(manager, app_inhibitor, combined).await
+            reload_config_internal(manager, combined).await
         }
         Err(e) => {
             serror!("Stasis", "Failed to reload config: {}", e);
@@ -28,7 +24,6 @@ pub async fn handle_reload(
 
 async fn reload_config_internal(
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
     combined: CombinedConfig,
 ) -> String {
     // Check if we need to cleanup media monitoring
@@ -47,6 +42,8 @@ async fn reload_config_internal(
     }
     
     // Update manager state with new config
+    // ✅ This updates state.inhibitors.inhibit_apps automatically
+    // The AppInhibitor background task will see the new list on its next check
     {
         let mut mgr = manager.lock().await;
         mgr.state.update_from_config(&combined.base).await;
@@ -62,13 +59,8 @@ async fn reload_config_internal(
     }
     
     // Get current state for response
-    let state_info = collect_full_state(Arc::clone(&manager), Arc::clone(&app_inhibitor)).await;
-    
-    // Update app inhibitor
-    {
-        let mut inhibitor = app_inhibitor.lock().await;
-        inhibitor.update_from_config(&combined.base).await;
-    }
+    // ✅ No app_inhibitor needed - reads from manager.state
+    let state_info = collect_full_state(Arc::clone(&manager)).await;
     
     sdebug!("Stasis", "Config reloaded successfully");
     

@@ -73,7 +73,6 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     // Spawn app inhibit task
     let app_inhibitor = spawn_app_inhibit_task(
         Arc::clone(&manager),
-        Arc::clone(&cfg)
     ).await;
    
     // Spawn media monitors
@@ -94,7 +93,6 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     // IPC control socket
     ipc::spawn_ipc_socket_with_listener(
         Arc::clone(&manager),
-        Arc::clone(&app_inhibitor),
         listener,
     ).await;
 

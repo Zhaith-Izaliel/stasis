@@ -4,18 +4,15 @@ use tokio::{
     net::UnixListener,
     time::{Duration, timeout},
 };
-
 use crate::{
-    core::{manager::Manager, services::app_inhibit::AppInhibitor},
+    core::manager::Manager,
     sdebug, serror,
 };
-
 use super::router::route_command;
 
 /// Spawns the IPC socket server that listens for incoming commands
 pub async fn spawn_ipc_socket_with_listener(
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
     listener: UnixListener,
 ) {
     tokio::spawn(async move {
@@ -23,11 +20,10 @@ pub async fn spawn_ipc_socket_with_listener(
             match listener.accept().await {
                 Ok((mut stream, _addr)) => {
                     let manager = Arc::clone(&manager);
-                    let app_inhibitor = Arc::clone(&app_inhibitor);
                     
                     tokio::spawn(async move {
                         let result = timeout(Duration::from_secs(10), async {
-                            if let Err(e) = handle_connection(&mut stream, manager, app_inhibitor).await {
+                            if let Err(e) = handle_connection(&mut stream, manager).await {
                                 serror!("Stasis", "Error handling IPC connection: {}", e);
                             }
                         }).await;
@@ -49,7 +45,6 @@ pub async fn spawn_ipc_socket_with_listener(
 async fn handle_connection(
     stream: &mut tokio::net::UnixStream,
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
 ) -> std::io::Result<()> {
     let mut buf = vec![0u8; 256];
     let n = stream.read(&mut buf).await?;
@@ -64,7 +59,8 @@ async fn handle_connection(
         sdebug!("Stasis", "Received IPC command: {}", cmd);
     }
     
-    let response = route_command(&cmd, manager, app_inhibitor).await;
+    // ✅ Only pass manager - all state including inhibit_apps is in manager.state
+    let response = route_command(&cmd, manager).await;
     
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await?;

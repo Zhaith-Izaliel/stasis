@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use crate::{
-    core::{manager::Manager, services::app_inhibit::AppInhibitor},
+    core::manager::Manager,
     serror,
 };
-
 use super::handlers::{
     config, control, info, pause_resume, profile, trigger,
 };
@@ -12,18 +11,16 @@ use super::handlers::{
 pub async fn route_command(
     cmd: &str,
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
 ) -> String {
     match cmd {
         // Config
-        "reload" => config::handle_reload(manager, app_inhibitor).await,
+        "reload" => config::handle_reload(manager).await,
         
         // Pause/Resume
         cmd if cmd.starts_with("pause") => {
             let args = cmd.strip_prefix("pause").unwrap_or("").trim();
             pause_resume::handle_pause(manager, args).await
         }
-
         "resume" => pause_resume::handle_resume(manager).await,
         
         // List
@@ -52,7 +49,8 @@ pub async fn route_command(
         // Info
         "info" | "info --json" => {
             let as_json = cmd.contains("--json");
-            info::handle_info(manager, app_inhibitor, as_json).await
+            // ✅ Only pass manager - reads state from manager.state.inhibitors
+            info::handle_info(manager, as_json).await
         }
         
         // Unknown

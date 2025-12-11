@@ -1,15 +1,11 @@
 use std::sync::Arc;
 use tokio::time::Duration;
-use crate::core::{
-    manager::Manager,
-    services::app_inhibit::AppInhibitor,
-};
-use super::state_info::{collect_state_with_app_check, format_text_response, format_json_response};
+use crate::core::manager::Manager;
+use super::state_info::{collect_manager_state, format_text_response, format_json_response};
 
 /// Handles the "info" command - displays current state
 pub async fn handle_info(
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
     as_json: bool,
 ) -> String {
     let mut retry_count = 0;
@@ -18,7 +14,8 @@ pub async fn handle_info(
     loop {
         match manager.try_lock() {
             Ok(mut mgr) => {
-                let state = collect_state_with_app_check(&mut mgr, Arc::clone(&app_inhibitor)).await;
+                // ✅ No need for app_inhibitor - state is in manager.state.inhibitors
+                let state = collect_manager_state(&mut mgr);
                 drop(mgr);
                 
                 return if as_json {
