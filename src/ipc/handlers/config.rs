@@ -2,8 +2,8 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use crate::{
     config::{self, model::CombinedConfig},
-    core::manager::Manager,
-    sdebug, serror, sinfo,
+    core::manager::{Manager, helpers::profile_to_stasis_config},
+    sdebug, serror, sinfo, swarn,
 };
 use super::state_info::{collect_full_state, format_text_response};
 
@@ -41,17 +41,49 @@ async fn reload_config_internal(
         cleanup_media_monitoring(Arc::clone(&manager)).await;
     }
     
-    // Update manager state with new config
-    // ✅ This updates state.inhibitors.inhibit_apps automatically
-    // The AppInhibitor background task will see the new list on its next check
+    let (config_to_apply, profile_status) = {
+        let mgr = manager.lock().await;
+        let current_profile = mgr.state.profile.active_profile.clone();
+        
+        match current_profile {
+            None => {
+                // Using base config, keep using base
+                (combined.base.clone(), "Staying on base configuration".to_string())
+            }
+            Some(ref profile_name) => {
+                // Check if current profile still exists in reloaded config
+                if let Some(profile) = combined.profiles.iter().find(|p| &p.name == profile_name) {
+                    // Profile still exists, use it
+                    let profile_config = profile_to_stasis_config(profile);
+                    (profile_config, format!("Staying on profile: {}", profile_name))
+                } else {
+                    // Profile was removed, fall back to base
+                    swarn!("Stasis", "Profile '{}' no longer exists, falling back to base config", profile_name);
+                    (combined.base.clone(), format!("Profile '{}' removed, switched to base config", profile_name))
+                }
+            }
+        }
+    };
+    
+    // Update manager state with the appropriate config
     {
         let mut mgr = manager.lock().await;
-        mgr.state.update_from_config(&combined.base).await;
+        
+        // First reload the profiles list
         mgr.state.reload_profiles(&combined).await;
+        
+        // Then apply the appropriate config (base or current profile)
+        mgr.state.update_from_config(&config_to_apply).await;
+        
+        // Update active profile tracking (None if fell back to base, Some if staying on profile)
+        if profile_status.starts_with("Profile") && profile_status.contains("removed") {
+            mgr.state.profile.set_active(None);
+        }
+        // If staying on profile, active_profile is already set correctly
     }
     
     // Restart media monitoring if enabled
-    if combined.base.monitor_media {
+    if config_to_apply.monitor_media {
         restart_media_monitoring(Arc::clone(&manager)).await;
     } else {
         let mut mgr = manager.lock().await;
@@ -59,12 +91,11 @@ async fn reload_config_internal(
     }
     
     // Get current state for response
-    // ✅ No app_inhibitor needed - reads from manager.state
     let state_info = collect_full_state(Arc::clone(&manager)).await;
     
-    sdebug!("Stasis", "Config reloaded successfully");
+    sdebug!("Stasis", "Config reloaded successfully: {}", profile_status);
     
-    format_text_response(&state_info, Some("Config reloaded successfully"))
+    format_text_response(&state_info, Some(&format!("Config reloaded successfully\n{}", profile_status)))
 }
 
 async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {

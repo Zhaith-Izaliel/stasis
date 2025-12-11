@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex;
 use tokio::process::Command;
+use tokio::task::JoinHandle;
 use serde_json::Value;
 use procfs::process::all_processes;
 
@@ -51,7 +52,6 @@ impl AppInhibitor {
         running
     }
 
-    // ✅ Now async to read from manager state
     async fn check_processes_with_tracking(&mut self, new_active_apps: &mut HashSet<String>) -> bool {
         let mut any_running = false;
 
@@ -60,7 +60,6 @@ impl AppInhibitor {
             Err(_) => return false,
         };
 
-        // ✅ Read inhibit_apps from manager state
         let inhibit_apps = {
             let mgr = self.manager.lock().await;
             mgr.state.inhibitors.inhibit_apps.clone()
@@ -144,11 +143,7 @@ impl AppInhibitor {
         Ok(windows)
     }
 
-    // ✅ Synchronous version that takes inhibit_apps as parameter
-    // Used during compositor window filtering where we can't easily await
     fn should_inhibit_for_app_sync(&self, app_id: &str) -> bool {
-        // We need to block here to read from manager state
-        // This is acceptable since compositor checks are infrequent
         let inhibit_apps = {
             let mgr = futures::executor::block_on(self.manager.lock());
             mgr.state.inhibitors.inhibit_apps.clone()
@@ -175,60 +170,71 @@ impl AppInhibitor {
         }
         false
     }
-
-    pub async fn shutdown(&mut self) {
-        sinfo!("Stasis", "Shutting down app inhibitor...");
-        self.active_apps.clear();
-    }
 }
 
+/// Spawns the app inhibitor background task and returns its JoinHandle
 pub async fn spawn_app_inhibit_task(
     manager: Arc<Mutex<Manager>>,
-) -> Arc<Mutex<AppInhibitor>> {
-    // ✅ Check if any apps are configured by reading from manager state
+) -> JoinHandle<()> {
+    // Check if any apps are configured by reading from manager state
     let has_apps = {
         let mgr = manager.lock().await;
         !mgr.state.inhibitors.inhibit_apps.is_empty()
     };
 
-    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
-
     if !has_apps {
         sinfo!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
-        tokio::spawn(async move {
-            futures::future::pending::<()>().await;
+        return tokio::spawn(async move {
+            // Still need to listen for shutdown even when sleeping
+            let shutdown = {
+                let mgr = manager.lock().await;
+                mgr.state.shutdown_flag.clone()
+            };
+            shutdown.notified().await;
+            sinfo!("Stasis", "App inhibitor shutting down...");
         });
-        return inhibitor;
     }
 
+    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
     let inhibitor_clone = Arc::clone(&inhibitor);
 
     tokio::spawn(async move {
         let mut inhibitor_active = false;
 
         loop {
-            let running = {
-                let mut guard = inhibitor_clone.lock().await;
-                guard.is_any_app_running().await
+            let shutdown = {
+                let guard = inhibitor_clone.lock().await;
+                guard.manager.lock().await.state.shutdown_flag.clone()
             };
 
-            if running && !inhibitor_active {
-                // App started inhibiting
-                let guard = inhibitor_clone.lock().await;
-                let mut mgr = guard.manager.lock().await;
-                incr_active_inhibitor(&mut mgr).await;
-                inhibitor_active = true;
-            } else if !running && inhibitor_active {
-                // All apps stopped inhibiting
-                let guard = inhibitor_clone.lock().await;
-                let mut mgr = guard.manager.lock().await;
-                decr_active_inhibitor(&mut mgr).await;
-                inhibitor_active = false;
+            tokio::select! {
+                _ = shutdown.notified() => {
+                    sinfo!("Stasis", "App inhibitor shutting down...");
+                    break;
+                }
+                
+                _ = tokio::time::sleep(std::time::Duration::from_secs(4)) => {
+                    let running = {
+                        let mut guard = inhibitor_clone.lock().await;
+                        guard.is_any_app_running().await
+                    };
+
+                    if running && !inhibitor_active {
+                        // App started inhibiting
+                        let guard = inhibitor_clone.lock().await;
+                        let mut mgr = guard.manager.lock().await;
+                        incr_active_inhibitor(&mut mgr).await;
+                        inhibitor_active = true;
+                    } else if !running && inhibitor_active {
+                        // All apps stopped inhibiting
+                        let guard = inhibitor_clone.lock().await;
+                        let mut mgr = guard.manager.lock().await;
+                        decr_active_inhibitor(&mut mgr).await;
+                        inhibitor_active = false;
+                    }
+                }
             }
-
-            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         }
-    });
-
-    inhibitor
+    })
 }
+

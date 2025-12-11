@@ -78,11 +78,10 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 (ignore, blacklist, mgr.state.media.media_bridge_active)
             };
 
-            // Always check non-Firefox players, regardless of bridge state
             let playing = check_media_playing(
                 ignore_remote_media,
                 &media_blacklist,
-                bridge_active // skip Firefox if bridge is active
+                bridge_active
             );
             
             if playing {
@@ -91,63 +90,74 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     sinfo!("MPRIS", "Initial check: media playing");
                     incr_active_inhibitor(&mut mgr).await;
                     mgr.state.media.mpris_media_playing = true;
-                    
-                    // Update overall flags
                     mgr.state.media.media_playing = true;
                     mgr.state.media.media_blocking = true;
                 }
             }
         }
 
+        let shutdown = {
+            let mgr = manager.lock().await;
+            mgr.state.shutdown_flag.clone()
+        };
+
         // Monitor MPRIS changes
         loop {
-            if let Some(_msg) = stream.next().await {
-                let (ignore_remote_media, media_blacklist, bridge_active) = {
-                    let mgr = manager.lock().await;
-                    let ignore = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.ignore_remote_media)
-                        .unwrap_or(false);
-                    let blacklist = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.media_blacklist.clone())
-                        .unwrap_or_default();
-                    (ignore, blacklist, mgr.state.media.media_bridge_active)
-                };
-
-                // Check non-Firefox players (or all players if bridge inactive)
-                let any_playing = check_media_playing(
-                    ignore_remote_media,
-                    &media_blacklist,
-                    bridge_active // skip Firefox if bridge is active
-                );
-                
-                let mut mgr = manager.lock().await;
-                
-                // Update MPRIS-specific inhibitor
-                if any_playing && !mgr.state.media.mpris_media_playing {
-                    sdebug!("MPRIS", "Media started");
-                    incr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media.mpris_media_playing = true;
-                } else if !any_playing && mgr.state.media.mpris_media_playing {
-                    // Do final verification with playerctl + pactl
-                    if !bridge_active && has_playerctl_players() && has_any_media_playing() {
-                        continue;
-                    }
-                   
-                    sdebug!("MPRIS", "Media stopped");
-                    decr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media.mpris_media_playing = false;
+            tokio::select! {
+                _ = shutdown.notified() => {
+                    sinfo!("MPRIS", "Media monitor shutting down...");
+                    break;
                 }
                 
-                // Update overall media state (combines MPRIS + browser)
-                update_combined_state(&mut mgr);
+                msg = stream.next() => {
+                    if msg.is_none() {
+                        break;
+                    }
+                    
+                    let (ignore_remote_media, media_blacklist, bridge_active) = {
+                        let mgr = manager.lock().await;
+                        let ignore = mgr.state.cfg
+                            .as_ref()
+                            .map(|c| c.ignore_remote_media)
+                            .unwrap_or(false);
+                        let blacklist = mgr.state.cfg
+                            .as_ref()
+                            .map(|c| c.media_blacklist.clone())
+                            .unwrap_or_default();
+                        (ignore, blacklist, mgr.state.media.media_bridge_active)
+                    };
+
+                    let any_playing = check_media_playing(
+                        ignore_remote_media,
+                        &media_blacklist,
+                        bridge_active
+                    );
+                    
+                    let mut mgr = manager.lock().await;
+                    
+                    if any_playing && !mgr.state.media.mpris_media_playing {
+                        sdebug!("MPRIS", "Media started");
+                        incr_active_inhibitor(&mut mgr).await;
+                        mgr.state.media.mpris_media_playing = true;
+                    } else if !any_playing && mgr.state.media.mpris_media_playing {
+                        if !bridge_active && has_playerctl_players() && has_any_media_playing() {
+                            continue;
+                        }
+                       
+                        sdebug!("MPRIS", "Media stopped");
+                        decr_active_inhibitor(&mut mgr).await;
+                        mgr.state.media.mpris_media_playing = false;
+                    }
+                    
+                    update_combined_state(&mut mgr);
+                }
             }
         }
     });
     
     Ok(())
 }
+
 
 /// Update the combined media_playing and media_blocking flags based on all sources
 fn update_combined_state(mgr: &mut Manager) {
