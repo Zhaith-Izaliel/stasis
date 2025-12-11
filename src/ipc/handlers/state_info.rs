@@ -2,7 +2,6 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use crate::core::{
     manager::{Manager, helpers::{current_profile, list_profiles}},
-    services::app_inhibit::AppInhibitor,
     utils::format_duration,
 };
 
@@ -19,51 +18,21 @@ pub struct StateInfo {
     pub available_profiles: Vec<String>,
 }
 
-/// Collects comprehensive state information from manager and app inhibitor (async)
+/// Collects comprehensive state information from manager (async)
 pub async fn collect_full_state(
     manager: Arc<tokio::sync::Mutex<Manager>>,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
 ) -> StateInfo {
-    let (idle_time, uptime, manually_inhibited, paused, media_blocking, 
-         media_bridge_active, cfg, profile, available_profiles) = {
-        let mut mgr = manager.lock().await;
-        (
-            mgr.state.timing.last_activity.elapsed(),
-            mgr.state.timing.start_time.elapsed(),
-            mgr.state.inhibitors.manually_paused,
-            mgr.state.inhibitors.paused,
-            mgr.state.media.media_blocking,
-            mgr.state.media.media_bridge_active,
-            mgr.state.cfg.clone(),
-            current_profile(&mut mgr),
-            list_profiles(&mut mgr)
-        )
-    };
-    
-    let app_blocking = tokio::time::timeout(
-        Duration::from_millis(100),
-        async {
-            let mut inhibitor = app_inhibitor.lock().await;
-            inhibitor.is_any_app_running().await
-        }
-    ).await.unwrap_or(false);
-    
-    StateInfo {
-        idle_time,
-        uptime,
-        manually_inhibited,
-        paused,
-        media_blocking,
-        media_bridge_active,
-        app_blocking,
-        cfg,
-        profile,
-        available_profiles,
-    }
+    let mut mgr = manager.lock().await;
+    collect_manager_state(&mut mgr)
 }
 
-/// Collects state information from manager only (sync, no app inhibitor)
+/// Collects state information from manager only (sync)
 pub fn collect_manager_state(mgr: &mut Manager) -> StateInfo {
+    // ✅ Check if app blocking is active by checking inhibitor count
+    // The AppInhibitor background task updates this when apps are detected
+    let app_blocking = mgr.state.inhibitors.active_inhibitor_count > 0 
+        && !mgr.state.inhibitors.inhibit_apps.is_empty();
+    
     StateInfo {
         idle_time: mgr.state.timing.last_activity.elapsed(),
         uptime: mgr.state.timing.start_time.elapsed(),
@@ -71,30 +40,11 @@ pub fn collect_manager_state(mgr: &mut Manager) -> StateInfo {
         paused: mgr.state.inhibitors.paused,
         media_blocking: mgr.state.media.media_blocking,
         media_bridge_active: mgr.state.media.media_bridge_active,
-        app_blocking: false, // Not available without app_inhibitor
+        app_blocking,
         cfg: mgr.state.cfg.clone(),
         profile: current_profile(mgr),
         available_profiles: list_profiles(mgr),
     }
-}
-
-/// Collects state with separate app_blocking check (for info handler with try_lock)
-pub async fn collect_state_with_app_check(
-    mgr: &mut Manager,
-    app_inhibitor: Arc<tokio::sync::Mutex<AppInhibitor>>,
-) -> StateInfo {
-    let mut state = collect_manager_state(mgr);
-    
-    // Check app blocking separately
-    state.app_blocking = tokio::time::timeout(
-        Duration::from_millis(100),
-        async {
-            let mut inhibitor = app_inhibitor.lock().await;
-            inhibitor.is_any_app_running().await
-        }
-    ).await.unwrap_or(false);
-    
-    state
 }
 
 /// Formats state info into a pretty-printed text string

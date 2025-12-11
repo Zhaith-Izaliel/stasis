@@ -76,12 +76,15 @@ impl ManagerState {
         let power = PowerState::new_from_config(&cfg.actions);
         let debounce = DebounceState::new(cfg.debounce_seconds.into());
 
+        let mut inhibitors = InhibitorState::default();
+        inhibitors.inhibit_apps = cfg.inhibit_apps.clone();
+        
         Self {
             actions: ActionState::default(),
             brightness: BrightnessState::default(),
             cfg: Some(cfg.clone()),
             debounce,
-            inhibitors: InhibitorState::default(),
+            inhibitors,
             lock: LockState::from_config(&cfg),
             lock_notify: Arc::new(Notify::new()),
             media: MediaState::default(),
@@ -159,6 +162,8 @@ impl ManagerState {
 
         self.actions.reset();
         self.debounce.reset_main(cfg.debounce_seconds.into());
+
+        self.inhibitors.inhibit_apps = cfg.inhibit_apps.clone();
 
         self.cfg = Some(Arc::new(cfg.clone()));
         self.lock = LockState::from_config(cfg);

@@ -4,21 +4,19 @@ use tokio::process::Command;
 use serde_json::Value;
 use procfs::process::all_processes;
 
-use crate::config::model::StasisConfig;
 use crate::core::manager::inhibitors::{decr_active_inhibitor, incr_active_inhibitor};
 use crate::core::manager::Manager;
 use crate::{sdebug, sinfo};
 
 /// Tracks currently running apps to inhibit idle
 pub struct AppInhibitor {
-    cfg: Arc<StasisConfig>,
     active_apps: HashSet<String>,
     desktop: String,
     manager: Arc<Mutex<Manager>>,
 }
 
 impl AppInhibitor {
-    pub fn new(cfg: Arc<StasisConfig>, manager: Arc<Mutex<Manager>>) -> Self {
+    pub fn new(manager: Arc<Mutex<Manager>>) -> Self {
         let desktop = std::env::var("XDG_CURRENT_DESKTOP")
             .unwrap_or_default()
             .to_lowercase();
@@ -26,15 +24,10 @@ impl AppInhibitor {
         sdebug!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop);
 
         Self {
-            cfg,
             active_apps: HashSet::new(),
             desktop,
             manager,
         }
-    }
-
-    pub async fn update_from_config(&mut self, cfg: &StasisConfig) {
-        self.cfg = Arc::new(cfg.clone());
     }
 
     pub async fn is_any_app_running(&mut self) -> bool {
@@ -45,7 +38,7 @@ impl AppInhibitor {
                 new_active_apps = result_apps;
                 !new_active_apps.is_empty()
             },
-            Err(_) => self.check_processes_with_tracking(&mut new_active_apps),
+            Err(_) => self.check_processes_with_tracking(&mut new_active_apps).await,
         };
 
         for app in &new_active_apps {
@@ -58,18 +51,25 @@ impl AppInhibitor {
         running
     }
 
-    fn check_processes_with_tracking(&mut self, new_active_apps: &mut HashSet<String>) -> bool {
+    // ✅ Now async to read from manager state
+    async fn check_processes_with_tracking(&mut self, new_active_apps: &mut HashSet<String>) -> bool {
         let mut any_running = false;
 
         let processes_iter = match all_processes() {
             Ok(iter) => iter,
-            Err(_) => return false, // unable to read /proc
+            Err(_) => return false,
+        };
+
+        // ✅ Read inhibit_apps from manager state
+        let inhibit_apps = {
+            let mgr = self.manager.lock().await;
+            mgr.state.inhibitors.inhibit_apps.clone()
         };
 
         for process in processes_iter {
             let process = match process {
                 Ok(p) => p,
-                Err(_) => continue, // skip processes that failed
+                Err(_) => continue,
             };
 
             let proc_name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
@@ -77,7 +77,7 @@ impl AppInhibitor {
                 Err(_) => continue,
             };
 
-            for pattern in &self.cfg.inhibit_apps {
+            for pattern in &inhibit_apps {
                 let matched = match pattern {
                     crate::config::model::AppInhibitPattern::Literal(s) => {
                         proc_name.eq_ignore_ascii_case(s)
@@ -101,14 +101,14 @@ impl AppInhibitor {
             "niri" => {
                 let app_ids = self.try_niri_ipc().await?;
                 Ok(app_ids.into_iter()
-                    .filter(|app| self.should_inhibit_for_app(app))
+                    .filter(|app| self.should_inhibit_for_app_sync(app))
                     .collect())
             }
             "hyprland" => {
                 let windows = self.try_hyprland_ipc().await?;
                 Ok(windows.into_iter()
                     .filter_map(|win| win.get("app_id").and_then(|v| v.as_str()).map(|s| s.to_string()))
-                    .filter(|app| self.should_inhibit_for_app(app))
+                    .filter(|app| self.should_inhibit_for_app_sync(app))
                     .collect())
             }
             _ => Err("No IPC available, fallback to process scan".into())
@@ -144,8 +144,17 @@ impl AppInhibitor {
         Ok(windows)
     }
 
-    fn should_inhibit_for_app(&self, app_id: &str) -> bool {
-        for pattern in &self.cfg.inhibit_apps {
+    // ✅ Synchronous version that takes inhibit_apps as parameter
+    // Used during compositor window filtering where we can't easily await
+    fn should_inhibit_for_app_sync(&self, app_id: &str) -> bool {
+        // We need to block here to read from manager state
+        // This is acceptable since compositor checks are infrequent
+        let inhibit_apps = {
+            let mgr = futures::executor::block_on(self.manager.lock());
+            mgr.state.inhibitors.inhibit_apps.clone()
+        };
+
+        for pattern in &inhibit_apps {
             let matched = match pattern {
                 crate::config::model::AppInhibitPattern::Literal(s) => self.app_id_matches(s, app_id),
                 crate::config::model::AppInhibitPattern::Regex(r) => r.is_match(app_id),
@@ -175,11 +184,16 @@ impl AppInhibitor {
 
 pub async fn spawn_app_inhibit_task(
     manager: Arc<Mutex<Manager>>,
-    cfg: Arc<StasisConfig>,
 ) -> Arc<Mutex<AppInhibitor>> {
-    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(cfg.clone(), Arc::clone(&manager))));
+    // ✅ Check if any apps are configured by reading from manager state
+    let has_apps = {
+        let mgr = manager.lock().await;
+        !mgr.state.inhibitors.inhibit_apps.is_empty()
+    };
 
-    if cfg.inhibit_apps.is_empty() {
+    let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
+
+    if !has_apps {
         sinfo!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
         tokio::spawn(async move {
             futures::future::pending::<()>().await;
@@ -218,4 +232,3 @@ pub async fn spawn_app_inhibit_task(
 
     inhibitor
 }
-
