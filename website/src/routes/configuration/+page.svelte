@@ -10,6 +10,7 @@
     { id: 'stasis-block', title: 'Stasis Block' },
     { id: 'media', title: 'Media Monitoring' },
     { id: 'inhibitors', title: 'Inhibitors' },
+    { id: 'notifications', title: 'Notifications' },
     { id: 'laptop', title: 'Laptop Settings' },
     { id: 'actions', title: 'Idle Actions' },
     { id: 'desktop', title: 'Desktop Actions' },
@@ -110,6 +111,7 @@ lid_open_action "wake"`;
   timeout 300  # 5 minutes
   command "loginctl lock-session"
   resume-command "notify-send 'Welcome Back $env.USER!'"
+  notification "Locking session in 5s"
 end
 
 dpms:
@@ -401,6 +403,37 @@ end`;
         </ul>
       </div>
     </section>
+
+    <section id="notifications">
+      <h2>Notifications</h2>
+
+      <h3>On Unpause</h3>
+      <p>
+        Since Stasis can be paused for long periods, you can turn on a configuration option in order
+        to leave a notification whenever the pause duration has ended.
+
+      </p>
+      <CodeBlock code="notify_on_unpause = true" language="rune" />
+      
+      <h3>Pre-Action</h3>
+      <p>
+        Stasis allows you to configure a notification to be shown a certain number of seconds before
+        an action runs (or 0 for the same instant the action triggers). In order to do this you require 3 things,<br /><br />
+
+        <b>1:</b> Enable the notification system for actions within your config:
+      </p>
+      <CodeBlock code="notify_before_action true" language="rune" />
+
+      <p>
+        <b>2:</b> Set your desired time for notification to appear before your actions fire (optional):
+      </p>
+      <CodeBlock code="notify_seconds_before 5" language="rune" />
+      
+      <p>
+        <b>3:</b> Later on this page when configuring your actions, make sure to configure the <code>notification</code> option so that Your
+        notification appears for that configuration
+      </p>
+    </section>
     
     <section id="laptop">
       <h2>Laptop Settings</h2>
@@ -446,6 +479,7 @@ end`;
         <li><code>timeout</code> - Seconds of idle time before triggering (required)</li>
         <li><code>command</code> - Command to run when action triggers (required)</li>
         <li><code>resume-command</code> - Command to run when activity resumes (optional)</li>
+        <li><code>notification</code> - Notification to be displayed before this action runs</li>  
       </ul>
       
       <h3>Built-in Action Types</h3>

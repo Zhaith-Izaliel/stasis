@@ -58,9 +58,7 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 - [x] **CLI per-state triggers** – Trigger a **specific state**, the **current state**, or **all states**, all while respecting previously completed actions.  
 - [x] **Custom notifications** – Run notifications before any command block as well as notify on unpause! Requires `libnotify`.
 - [x] **Logind lock detection** – Optional `lock_detection_type` config for compositors using loginctl (e.g., quickshell). Uses `busctl` to query systemd-logind's LockedHint property.
-
-### In Progress
-- [ ] **User profiles / presets** – Save and load different workflows for various scenarios (work, gaming, etc.).
+- [x] **User profiles / presets** – Save and load different complete configuration states for various scenarios (work, gaming, presentation etc.) and switch between them on-the-fly without restarting the daemon.
 
 ### Planned
 - [ ] **Logging & analytics** – Historical idle data for power/performance insights.
