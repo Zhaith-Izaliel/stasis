@@ -424,6 +424,11 @@ impl Manager {
             }
         }
         
+        let old_monitor_media = self.state.cfg
+            .as_ref()
+            .map(|c| c.monitor_media)
+            .unwrap_or(true);
+        
         // Get the profile or fall back to base config
         let config_to_apply = if let Some(name) = &profile_name_opt {
             let profile = self.state.profile.get_profile(name)
@@ -439,11 +444,24 @@ impl Manager {
             }
         };
         
+        let new_monitor_media = config_to_apply.monitor_media;
+        
+        if old_monitor_media && !new_monitor_media {
+            sdebug!("Stasis", "Profile switch disabling media monitoring");
+            self.cleanup_media_monitoring().await;
+        }
+        
         // Apply the config
         self.state.update_from_config(&config_to_apply).await;
         
         // Update active profile tracking
         self.state.profile.set_active(profile_name_opt.clone());
+        
+        if new_monitor_media && !old_monitor_media {
+            sdebug!("Stasis", "Profile switch enabling media monitoring");
+            // Media monitoring is handled by the always-running tasks that check config
+            // No need to restart here - they'll see the config change
+        }
         
         // Return success message
         Ok(if let Some(name) = profile_name_opt {
@@ -452,7 +470,7 @@ impl Manager {
             "Switched to base configuration".to_string()
         })
     }
-    
+ 
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.inhibitors.manually_paused = true;

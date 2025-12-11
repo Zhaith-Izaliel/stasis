@@ -101,11 +101,6 @@ async fn reload_config_internal(
 async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
     let mut mgr = manager.lock().await;
     mgr.cleanup_media_monitoring().await;
-    
-    if mgr.state.media.media_bridge_active {
-        drop(mgr);
-        crate::core::services::browser_media::stop_browser_monitor(manager).await;
-    }
 }
 
 async fn restart_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {

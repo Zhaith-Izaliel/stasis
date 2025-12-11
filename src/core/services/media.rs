@@ -26,20 +26,6 @@ const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
 ];
 
 pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<()> {
-    // Check if media monitoring is enabled
-    let monitor_media = {
-        let mgr = manager.lock().await;
-        mgr.state.cfg
-            .as_ref()
-            .map(|c| c.monitor_media)
-            .unwrap_or(true)
-    };
-    
-    if !monitor_media {
-        sinfo!("MPRIS", "Media monitor disabled in config");
-        return Ok(());
-    }
-
     sinfo!("MPRIS", "Starting media monitor");
 
     task::spawn(async move {
@@ -65,33 +51,42 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
 
         // Initial check
         {
-            let (ignore_remote_media, media_blacklist, bridge_active) = {
+            let monitor_enabled = {
                 let mgr = manager.lock().await;
-                let ignore = mgr.state.cfg
-                    .as_ref()
-                    .map(|c| c.ignore_remote_media)
-                    .unwrap_or(false);
-                let blacklist = mgr.state.cfg
-                    .as_ref()
-                    .map(|c| c.media_blacklist.clone())
-                    .unwrap_or_default();
-                (ignore, blacklist, mgr.state.media.media_bridge_active)
+                mgr.state.cfg.as_ref().map(|c| c.monitor_media).unwrap_or(true)
             };
-
-            let playing = check_media_playing(
-                ignore_remote_media,
-                &media_blacklist,
-                bridge_active
-            );
             
-            if playing {
-                let mut mgr = manager.lock().await;
-                if !mgr.state.media.mpris_media_playing {
-                    sinfo!("MPRIS", "Initial check: media playing");
-                    incr_active_inhibitor(&mut mgr).await;
-                    mgr.state.media.mpris_media_playing = true;
-                    mgr.state.media.media_playing = true;
-                    mgr.state.media.media_blocking = true;
+            if !monitor_enabled {
+                sdebug!("MPRIS", "Media monitoring disabled by config, skipping initial check");
+            } else {
+                let (ignore_remote_media, media_blacklist, bridge_active) = {
+                    let mgr = manager.lock().await;
+                    let ignore = mgr.state.cfg
+                        .as_ref()
+                        .map(|c| c.ignore_remote_media)
+                        .unwrap_or(false);
+                    let blacklist = mgr.state.cfg
+                        .as_ref()
+                        .map(|c| c.media_blacklist.clone())
+                        .unwrap_or_default();
+                    (ignore, blacklist, mgr.state.media.media_bridge_active)
+                };
+
+                let playing = check_media_playing(
+                    ignore_remote_media,
+                    &media_blacklist,
+                    bridge_active
+                );
+                
+                if playing {
+                    let mut mgr = manager.lock().await;
+                    if !mgr.state.media.mpris_media_playing {
+                        sinfo!("MPRIS", "Initial check: media playing");
+                        incr_active_inhibitor(&mut mgr).await;
+                        mgr.state.media.mpris_media_playing = true;
+                        mgr.state.media.media_playing = true;
+                        mgr.state.media.media_blocking = true;
+                    }
                 }
             }
         }
@@ -112,6 +107,17 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                 msg = stream.next() => {
                     if msg.is_none() {
                         break;
+                    }
+                    
+                    let monitor_enabled = {
+                        let mgr = manager.lock().await;
+                        mgr.state.cfg.as_ref().map(|c| c.monitor_media).unwrap_or(true)
+                    };
+                    
+                    if !monitor_enabled {
+                        // Skip processing if monitoring is disabled
+                        sdebug!("MPRIS", "Media monitoring disabled, skipping event");
+                        continue;
                     }
                     
                     let (ignore_remote_media, media_blacklist, bridge_active) = {
@@ -157,6 +163,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
     
     Ok(())
 }
+
 
 
 /// Update the combined media_playing and media_blocking flags based on all sources
