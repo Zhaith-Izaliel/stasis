@@ -244,69 +244,70 @@ impl Manager {
         let is_locked = self.state.lock.is_locked;
         let cmd_to_check = self.state.lock.command.clone();
 
-        for actions in [&mut self.state.power.default_actions, &mut self.state.power.ac_actions, &mut self.state.power.battery_actions] {
-            let mut past_lock = false;
-            for a in actions.iter_mut() {
-                if a.is_instant() {
-                    continue;
-                }
-
-                if matches!(a.kind, crate::config::model::IdleAction::LockScreen) {
-                    past_lock = true;
-                }
-
-                if is_locked && past_lock {
-                    continue;
-                } 
-
-                a.last_triggered = None;
-            }
-        }
-
-        let (is_instant, lock_index) = {
-            let actions = self.state.get_active_actions_mut();
-            let index = actions.iter()
-                .position(|a| a.last_triggered.is_none())
-                .unwrap_or(actions.len().saturating_sub(1));
-            let is_instant = !actions.is_empty() && actions[index].is_instant();
-            let lock_index = if is_locked {
-                actions.iter().position(|a| matches!(a.kind, crate::config::model::IdleAction::LockScreen))
-            } else {
-                None
-            };
-            (is_instant, lock_index)
+        // Compute active action vector once
+        let active_block = match self.state.on_battery() {
+            Some(true) => &mut self.state.power.battery_actions,
+            Some(false) => &mut self.state.power.ac_actions,
+            None => &mut self.state.power.default_actions,
         };
 
-        if !is_locked {
-            let actions = self.state.get_active_actions();
-            let mut index = 0;
-            for a in actions {
-                if a.is_instant() {
-                    index += 1;
-                } else {
-                    break;
+        let now = Instant::now();
+        let debounce = Duration::from_secs(cfg.debounce_seconds as u64);
+        self.state.debounce.main_debounce = Some(now + debounce);
+        self.state.timing.last_activity = now;
+
+        // Determine lock index
+        let lock_index = active_block.iter().position(|a| matches!(a.kind, IdleAction::LockScreen));
+
+        // Clear/adjust last_triggered based on lock state
+        if self.state.lock.is_locked {
+            if let Some(lock_idx) = lock_index {
+                for (i, a) in active_block.iter_mut().enumerate() {
+                    if a.is_instant() { continue; }
+                    if i <= lock_idx {
+                        a.last_triggered = None; // pre-lock
+                    } else {
+                        a.last_triggered = Some(now + debounce); // post-lock
+                    }
                 }
+
+                self.state.actions.action_index = (lock_idx + 1).min(active_block.len().saturating_sub(1));
+                self.state.lock.post_advanced = true;
+            } else {
+                // No lock: clear all
+                for a in active_block.iter_mut().filter(|a| !a.is_instant()) {
+                    a.last_triggered = None;
+                }
+                self.state.actions.action_index = 0;
             }
-            self.state.actions.action_index = index;
+        } else {
+            // Not locked: clear all non-instant actions
+            for a in active_block.iter_mut().filter(|a| !a.is_instant()) {
+                a.last_triggered = None;
+            }
+
+            // Set action_index to first non-instant after instants
+            let index_after_instants = active_block.iter().take_while(|a| a.is_instant()).count();
+            self.state.actions.action_index = index_after_instants;
         }
 
-        // Fire appropriate resume queue based on lock state
-        if is_locked {
-            // While locked, fire post-lock resume commands (only once per lock session)
+        // Determine if next action is instant (only needed for early return)
+        let is_instant = active_block.get(self.state.actions.action_index)
+            .map(|a| a.is_instant())
+            .unwrap_or(false);
+
+        // Fire resume queues
+        if self.state.lock.is_locked {
             if !self.state.actions.post_lock_resumes_fired {
                 self.fire_post_lock_resume_queue().await;
                 self.state.actions.post_lock_resumes_fired = true;
             }
         } else {
-            // Not locked, fire all resume commands
             self.fire_all_resume_queues().await;
-            // Reset the flag for next lock session
             self.state.actions.post_lock_resumes_fired = false;
         }
 
-        if is_instant {
-            return;
-        }
+        if is_instant { return; }
 
         if is_locked {
             if let Some(lock_index) = lock_index {
@@ -399,14 +400,14 @@ impl Manager {
                 base_timeout_instant
             };
 
-            // sdebug!(
-            //     "Idle",
+            //sdebug!(
+            //     "Stasis",
             //     "next_action_instant: action={}, base_timeout={:?}s, notification_sent={}, next_wake={:?}s",
             //     action.name,
-            //     base_timeout_instant.duration_since(self.state.start_time).as_secs(),
-            //     self.state.notification_sent,
-            //     next_wake_time.duration_since(self.state.start_time).as_secs()
-            // );
+            //     base_timeout_instant.duration_since(self.state.timing.start_time).as_secs(),
+            //     self.state.notifications.notification_sent,
+            //     next_wake_time.duration_since(self.state.timing.start_time).as_secs()
+            //);
 
             min_time = Some(match min_time {
                 None => next_wake_time,
