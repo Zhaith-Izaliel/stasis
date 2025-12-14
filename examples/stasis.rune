@@ -89,7 +89,14 @@ stasis:
     lock-command "swaylock"
     # If you use quickshell this is the detection type you need
     # default: process
+    #
     #detection-type "logind"
+    #
+    #notification "Locking session in 10s"
+    # You can also define the `notify-seconds-before` from above here.
+    # NOTE: Once one action has `notify-seconds-before` configured the
+    # above global variable is ignored.
+    #notify-seconds-before 10
   end
 
   dpms:

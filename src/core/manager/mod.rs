@@ -100,7 +100,8 @@ impl Manager {
         let debounce = self.state.debounce.main_debounce;
         let notification_sent = self.state.notifications.notification_sent;
         
-        let (notify_enabled, notify_seconds) = if let Some(ref cfg) = self.state.cfg {
+        // Get global notification settings
+        let (global_notify_enabled, global_notify_seconds) = if let Some(ref cfg) = self.state.cfg {
             (cfg.notify_before_action, cfg.notify_seconds_before)
         } else {
             (false, 0)
@@ -134,6 +135,25 @@ impl Manager {
         };
 
         let has_notification = actions[index].notification.is_some();
+        
+        // Determine if we should use per-action timeout or global timeout
+        // Check if ANY action has a per-action notification timeout configured
+        let has_any_per_action_timeout = actions.iter()
+            .any(|a| a.notify_seconds_before.is_some());
+        
+        // Determine notification settings for current action
+        let (notify_enabled, notify_seconds) = if has_any_per_action_timeout {
+            // Use per-action timeout if configured, otherwise skip notifications for this action
+            if let Some(per_action_timeout) = actions[index].notify_seconds_before {
+                (true, per_action_timeout)
+            } else {
+                (false, 0)
+            }
+        } else {
+            // Fall back to global settings
+            (global_notify_enabled, global_notify_seconds)
+        };
+
         let notify_duration = Duration::from_secs(notify_seconds);
         let actual_action_fire_instant = if notify_enabled && has_notification {
             base_timeout_instant + notify_duration
@@ -351,12 +371,16 @@ impl Manager {
             return None;
         }
 
-        // Get config for notification settings
-        let (notify_enabled, notify_seconds) = if let Some(ref cfg) = self.state.cfg {
+        // Get global config for notification settings
+        let (global_notify_enabled, global_notify_seconds) = if let Some(ref cfg) = self.state.cfg {
             (cfg.notify_before_action, cfg.notify_seconds_before)
         } else {
             (false, 0)
         };
+
+        // Check if ANY action has a per-action notification timeout configured
+        let has_any_per_action_timeout = actions.iter()
+            .any(|a| a.notify_seconds_before.is_some());
 
         let mut min_time: Option<Instant> = None;
 
@@ -385,6 +409,19 @@ impl Manager {
                 base + timeout
             };
 
+            // Determine notification settings for this action
+            let (notify_enabled, notify_seconds) = if has_any_per_action_timeout {
+                // Use per-action timeout if configured, otherwise no notification for this action
+                if let Some(per_action_timeout) = action.notify_seconds_before {
+                    (true, per_action_timeout)
+                } else {
+                    (false, 0)
+                }
+            } else {
+                // Fall back to global settings
+                (global_notify_enabled, global_notify_seconds)
+            };
+
             // Determine the next wake time
             let next_wake_time = if notify_enabled && action.notification.is_some() {
                 if !self.state.notifications.notification_sent {
@@ -400,15 +437,6 @@ impl Manager {
                 base_timeout_instant
             };
 
-            //sdebug!(
-            //     "Stasis",
-            //     "next_action_instant: action={}, base_timeout={:?}s, notification_sent={}, next_wake={:?}s",
-            //     action.name,
-            //     base_timeout_instant.duration_since(self.state.timing.start_time).as_secs(),
-            //     self.state.notifications.notification_sent,
-            //     next_wake_time.duration_since(self.state.timing.start_time).as_secs()
-            //);
-
             min_time = Some(match min_time {
                 None => next_wake_time,
                 Some(current_min) => current_min.min(next_wake_time),
@@ -416,7 +444,7 @@ impl Manager {
         }
 
         min_time
-    } 
+    }
 
     pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
         let profile_name_opt = profile_name.map(|s| s.to_string());
