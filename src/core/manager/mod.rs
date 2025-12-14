@@ -139,12 +139,12 @@ impl Manager {
         // Determine if we should use per-action timeout or global timeout
         // Check if ANY action has a per-action notification timeout configured
         let has_any_per_action_timeout = actions.iter()
-            .any(|a| a.notification_seconds_before.is_some());
+            .any(|a| a.notify_seconds_before.is_some());
         
         // Determine notification settings for current action
         let (notify_enabled, notify_seconds) = if has_any_per_action_timeout {
             // Use per-action timeout if configured, otherwise skip notifications for this action
-            if let Some(per_action_timeout) = actions[index].notification_seconds_before {
+            if let Some(per_action_timeout) = actions[index].notify_seconds_before {
                 (true, per_action_timeout)
             } else {
                 (false, 0)
@@ -380,7 +380,7 @@ impl Manager {
 
         // Check if ANY action has a per-action notification timeout configured
         let has_any_per_action_timeout = actions.iter()
-            .any(|a| a.notification_seconds_before.is_some());
+            .any(|a| a.notify_seconds_before.is_some());
 
         let mut min_time: Option<Instant> = None;
 
@@ -412,7 +412,7 @@ impl Manager {
             // Determine notification settings for this action
             let (notify_enabled, notify_seconds) = if has_any_per_action_timeout {
                 // Use per-action timeout if configured, otherwise no notification for this action
-                if let Some(per_action_timeout) = action.notification_seconds_before {
+                if let Some(per_action_timeout) = action.notify_seconds_before {
                     (true, per_action_timeout)
                 } else {
                     (false, 0)

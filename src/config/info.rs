@@ -18,7 +18,7 @@ impl StasisConfig {
         
         // Check if any action has per-action notification timeout
         let has_per_action_timeouts = self.actions.iter()
-            .any(|a| a.notification_seconds_before.is_some());
+            .any(|a| a.notify_seconds_before.is_some());
         
         // Calculate the global pipe position - find the longest label across ALL sections
         let all_labels = vec![
@@ -201,7 +201,7 @@ impl StasisConfig {
                 
                 // Show per-action notification timeout if it exists
                 if has_per_action_timeouts {
-                    if let Some(notify_seconds) = action.notification_seconds_before {
+                    if let Some(notify_seconds) = action.notify_seconds_before {
                         out.push_str(&format!("     {:<width$} │ {}s\n", "NotifySecondsBefore", notify_seconds, width = max_label));
                     } else {
                         out.push_str(&format!("     {:<width$} │ none\n", "NotifySecondsBefore", width = max_label));

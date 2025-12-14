@@ -31,7 +31,7 @@ pub struct IdleActionBlock {
     pub lock_command: Option<String>,
     pub last_triggered: Option<Instant>,
     pub notification: Option<String>,
-    pub notification_seconds_before: Option<u64>,
+    pub notify_seconds_before: Option<u64>,
 }
 
 impl IdleActionBlock {
