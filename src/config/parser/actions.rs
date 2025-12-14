@@ -82,6 +82,11 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             .get::<String>(&format!("{}.{}.notification", path, key))
             .ok();
 
+        let notification_seconds_before = config
+            .get::<u64>(&format!("{}.{}.notification_seconds_before", path, key))
+            .ok()
+            .or_else(|| config.get::<u64>(&format!("{}.{}.notification-seconds-before", path, key)).ok());
+
         actions.push(IdleActionBlock {
             name: key.clone(),
             timeout,
@@ -91,6 +96,7 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             lock_command,
             last_triggered: None,
             notification,
+            notification_seconds_before,
         });
     }
 

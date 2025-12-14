@@ -16,19 +16,26 @@ impl StasisConfig {
     ) -> String {
         let mut out = String::new();
         
-        // Calculate the global pipe position
-        // Find the longest label across all sections
-        let status_labels = vec!["Idle Time", "Uptime", "Paused", "Manually Paused", 
-                                 "App Blocking", "Media Blocking", "Media Bridge", "Active Profile"];
-        let config_labels = vec!["PreSuspendCommand", "MonitorMedia", "IgnoreRemoteMedia", 
-                                 "RespectInhibitors", "NotifyOnUnpause", "NotifyBeforeAction",
-                                 "NotifySecondsBefore", "DebounceSeconds",
-                                 "LidCloseAction", "LidOpenAction", "InhibitApps", "Profiles"];
-        let action_labels = vec!["Timeout", "Kind", "Command", "LockCommand", "DetectionType", "Notification", "ResumeCommand"];
+        // Check if any action has per-action notification timeout
+        let has_per_action_timeouts = self.actions.iter()
+            .any(|a| a.notification_seconds_before.is_some());
         
-        let max_label = status_labels.iter()
-            .chain(config_labels.iter())
-            .chain(action_labels.iter())
+        // Calculate the global pipe position - find the longest label across ALL sections
+        let all_labels = vec![
+            // Status labels
+            "Active Profile", "Idle Time", "Uptime", "Paused", "Manually Paused", 
+            "App Blocking", "Media Blocking", "Media Bridge",
+            // Config labels
+            "PreSuspendCommand", "MonitorMedia", "IgnoreRemoteMedia", 
+            "RespectInhibitors", "NotifyOnUnpause", "NotifyBeforeAction",
+            "NotifySecondsBefore", "DebounceSeconds", "LidCloseAction", "LidOpenAction", 
+            "LockDetectionType", "InhibitApps", "Profiles",
+            // Action labels
+            "Timeout", "Kind", "Command", "LockCommand", "Notification", 
+            "NotifySecondsBefore", "ResumeCommand"
+        ];
+        
+        let max_label = all_labels.iter()
             .map(|s| s.len())
             .max()
             .unwrap_or(0);
@@ -38,33 +45,33 @@ impl StasisConfig {
         
         // Show active profile first
         let profile_display = active_profile.unwrap_or("base config");
-        out.push_str(&format!("  {:<width$} │ {}\n", "Active Profile", profile_display, width = max_label));
+        out.push_str(&format!("  {:<width$}    │ {}\n", "Active Profile", profile_display, width = max_label));
         
         if let Some(idle) = idle_time {
-            out.push_str(&format!("  {:<width$} │ {}\n", "Idle Time", utils::format_duration(idle), width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {}\n", "Idle Time", utils::format_duration(idle), width = max_label));
         }
         if let Some(up) = uptime {
-            out.push_str(&format!("  {:<width$} │ {}\n", "Uptime", utils::format_duration(up), width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {}\n", "Uptime", utils::format_duration(up), width = max_label));
         }
         if let Some(paused) = is_paused {
             let indicator = if paused { "●" } else { "○" };
-            out.push_str(&format!("  {:<width$} │ {} {}\n", "Paused", indicator, paused, width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {} {}\n", "Paused", indicator, paused, width = max_label));
         }
         if let Some(manually_paused) = is_manually_paused {
             let indicator = if manually_paused { "●" } else { "○" };
-            out.push_str(&format!("  {:<width$} │ {} {}\n", "Manually Paused", indicator, manually_paused, width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {} {}\n", "Manually Paused", indicator, manually_paused, width = max_label));
         }
         if let Some(app_paused) = app_blocking {
             let indicator = if app_paused { "●" } else { "○" };
-            out.push_str(&format!("  {:<width$} │ {} {}\n", "App Blocking", indicator, app_paused, width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {} {}\n", "App Blocking", indicator, app_paused, width = max_label));
         }
         if let Some(media_paused) = media_blocking {
             let indicator = if media_paused { "●" } else { "○" };
-            out.push_str(&format!("  {:<width$} │ {} {}\n", "Media Blocking", indicator, media_paused, width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {} {}\n", "Media Blocking", indicator, media_paused, width = max_label));
         }
         if let Some(bridge_active) = media_bridge_active {
             let indicator = if bridge_active { "●" } else { "○" };
-            out.push_str(&format!("  {:<width$} │ {} {}\n", "Media Bridge", indicator, bridge_active, width = max_label));
+            out.push_str(&format!("  {:<width$}    │ {} {}\n", "Media Bridge", indicator, bridge_active, width = max_label));
         }
         
         out.push('\n');
@@ -72,51 +79,58 @@ impl StasisConfig {
         // Config section
         out.push_str("◆ CONFIGURATION\n");
         out.push_str(&format!(
-            "  {:<width$} │ {}\n",
+            "  {:<width$}    │ {}\n",
             "PreSuspendCommand",
             self.pre_suspend_command.as_deref().unwrap_or("none"),
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {}\n",
+            "  {:<width$}    │ {}\n",
             "MonitorMedia",
             if self.monitor_media { "✓ enabled" } else { "✗ disabled" },
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {}\n", 
+            "  {:<width$}    │ {}\n", 
             "IgnoreRemoteMedia",
             if self.ignore_remote_media { "✓ enabled" } else { "✗ disabled" },
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {}\n",
+            "  {:<width$}    │ {}\n",
             "RespectInhibitors",
             if self.respect_wayland_inhibitors { "✓ enabled" } else { "✗ disabled" },
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {}\n",
+            "  {:<width$}    │ {}\n",
             "NotifyOnUnpause",
             if self.notify_on_unpause { "✓ enabled" } else { "✗ disabled" },
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {}\n",
+            "  {:<width$}    │ {}\n",
             "NotifyBeforeAction",
             if self.notify_before_action { "✓ enabled" } else { "✗ disabled" },
             width = max_label
         ));
         out.push_str(&format!(
-            "  {:<width$} │ {:?}\n",
+            "  {:<width$}    │ {:?}\n",
             "LockDetectionType",
             self.lock_detection_type,
             width = max_label
         ));
-        out.push_str(&format!("  {:<width$} │ {}s\n", "NotifySecondsBefore", self.notify_seconds_before, width = max_label));
-        out.push_str(&format!("  {:<width$} │ {}s\n", "DebounceSeconds", self.debounce_seconds, width = max_label));
-        out.push_str(&format!("  {:<width$} │ {}\n", "LidCloseAction", self.lid_close_action, width = max_label));
-        out.push_str(&format!("  {:<width$} │ {}\n", "LidOpenAction", self.lid_open_action, width = max_label));
+        
+        // Only show global NotifySecondsBefore if no per-action timeouts exist
+        if !has_per_action_timeouts {
+            out.push_str(&format!("  {:<width$}    │ {}s\n", "NotifySecondsBefore", self.notify_seconds_before, width = max_label));
+        } else {
+            out.push_str(&format!("  {:<width$}    │ {}\n", "NotifySecondsBefore", "per-action", width = max_label));
+        }
+        
+        out.push_str(&format!("  {:<width$}    │ {}s\n", "DebounceSeconds", self.debounce_seconds, width = max_label));
+        out.push_str(&format!("  {:<width$}    │ {}\n", "LidCloseAction", self.lid_close_action, width = max_label));
+        out.push_str(&format!("  {:<width$}    │ {}\n", "LidOpenAction", self.lid_open_action, width = max_label));
         
         let apps = if self.inhibit_apps.is_empty() {
             "none".to_string()
@@ -127,7 +141,7 @@ impl StasisConfig {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        out.push_str(&format!("  {:<width$} │ {}\n", "InhibitApps", apps, width = max_label));
+        out.push_str(&format!("  {:<width$}    │ {}\n", "InhibitApps", apps, width = max_label));
         
         // List available profiles
         let profiles_display = if let Some(profiles) = available_profiles {
@@ -139,7 +153,7 @@ impl StasisConfig {
         } else {
             "none".to_string()
         };
-        out.push_str(&format!("  {:<width$} │ {}\n", "Profiles", profiles_display, width = max_label));
+        out.push_str(&format!("  {:<width$}    │ {}\n", "Profiles", profiles_display, width = max_label));
         
         out.push('\n');
         
@@ -174,19 +188,28 @@ impl StasisConfig {
                 display_name
             ));
             
-            // Action details - indented to align pipes
-            out.push_str(&format!("     {:<width$} │ {}s\n", "Timeout", action.timeout, width = max_label - 3));
-            out.push_str(&format!("     {:<width$} │ {}\n", "Kind", action.kind, width = max_label - 3));
-            out.push_str(&format!("     {:<width$} │ {}\n", "Command", action.command, width = max_label - 3));
+            // Action details - use same width as other sections for aligned pipes
+            out.push_str(&format!("     {:<width$} │ {}s\n", "Timeout", action.timeout, width = max_label));
+            out.push_str(&format!("     {:<width$} │ {}\n", "Kind", action.kind, width = max_label));
+            out.push_str(&format!("     {:<width$} │ {}\n", "Command", action.command, width = max_label));
             
             if let Some(lock_cmd) = &action.lock_command {
-                out.push_str(&format!("     {:<width$} │ {}\n", "LockCommand", lock_cmd, width = max_label - 3));
+                out.push_str(&format!("     {:<width$} │ {}\n", "LockCommand", lock_cmd, width = max_label));
             }
             if let Some(notification) = &action.notification {
-                out.push_str(&format!("     {:<width$} │ {}\n", "Notification", notification, width = max_label - 3));
+                out.push_str(&format!("     {:<width$} │ {}\n", "Notification", notification, width = max_label));
+                
+                // Show per-action notification timeout if it exists
+                if has_per_action_timeouts {
+                    if let Some(notify_seconds) = action.notification_seconds_before {
+                        out.push_str(&format!("     {:<width$} │ {}s\n", "NotifySecondsBefore", notify_seconds, width = max_label));
+                    } else {
+                        out.push_str(&format!("     {:<width$} │ none\n", "NotifySecondsBefore", width = max_label));
+                    }
+                }
             }
             if let Some(resume_cmd) = &action.resume_command {
-                out.push_str(&format!("     {:<width$} │ {}\n", "ResumeCommand", resume_cmd, width = max_label - 3));
+                out.push_str(&format!("     {:<width$} │ {}\n", "ResumeCommand", resume_cmd, width = max_label));
             }
             
             action_counter += 1;
