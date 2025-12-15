@@ -1,6 +1,5 @@
 pub mod app;
 pub mod actions;
-pub mod brightness;
 pub mod debounce;
 pub mod inhibitors;
 pub mod lock;
@@ -18,7 +17,6 @@ use crate::{
     core::manager::state::{
         app::AppState,
         actions::ActionState, 
-        brightness::BrightnessState, 
         debounce::DebounceState, 
         inhibitors::InhibitorState, 
         lock::LockState, 
@@ -34,7 +32,6 @@ use crate::{
 pub struct ManagerState {
     pub app: AppState,
     pub actions: ActionState,
-    pub brightness: BrightnessState,
     pub cfg: Option<Arc<StasisConfig>>,
     pub debounce: DebounceState,
     pub inhibitors: InhibitorState,
@@ -56,7 +53,6 @@ impl Default for ManagerState {
         Self {
             app: AppState::default(),
             actions: ActionState::default(),
-            brightness: BrightnessState::default(),
             cfg: None,
             debounce: DebounceState::default(),
             inhibitors: InhibitorState::default(),
@@ -86,7 +82,6 @@ impl ManagerState {
         Self {
             app: AppState::default(),
             actions: ActionState::default(),
-            brightness: BrightnessState::default(),
             cfg: Some(cfg.clone()),
             debounce,
             inhibitors,
@@ -155,7 +150,6 @@ impl ManagerState {
 
     /// Config reload
     pub async fn update_from_config(&mut self, cfg: &StasisConfig) {
-        self.brightness.reset();
         self.pre_suspend_command = cfg.pre_suspend_command.clone();
 
         self.power.reload_actions(&cfg.actions);
