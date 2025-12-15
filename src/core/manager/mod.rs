@@ -1,5 +1,4 @@
 pub mod actions;
-pub mod brightness;
 pub mod helpers;
 pub mod idle_loops;
 pub mod inhibitors;
@@ -19,7 +18,6 @@ use crate::{
     config::model::{IdleAction, StasisConfig, CombinedConfig}, 
     core::manager::{
         actions::run_action,
-        brightness::restore_brightness,
         helpers::{profile_to_stasis_config, has_lock_action, get_lock_index},
         inhibitors::{incr_active_inhibitor, InhibitorSource},
         processes::{is_process_running, run_command_detached},
@@ -206,9 +204,11 @@ impl Manager {
                             sdebug!("Stasis", "Queueing pre-lock resume for: {}", action_clone.name);
                             self.state.actions.pre_lock_resume_queue.push(action_clone.clone());
                             
-                            // DPMS exception: Also add to post-lock queue so it fires on reset while locked
-                            if matches!(action_clone.kind, IdleAction::Dpms) {
-                                sdebug!("Stasis", "DPMS action - also queing for post-lock resume: {}", action_clone.name);
+                            // DPMS and Brightness exception: Also add to post-lock queue so it fires on reset while locked
+                            if matches!(action_clone.kind, IdleAction::Dpms | IdleAction::Brightness) {
+                                sdebug!("Stasis", "{} action - also queueing for post-lock resume: {}", 
+                                    if matches!(action_clone.kind, IdleAction::Dpms) { "DPMS" } else { "Brightness" },
+                                    action_clone.name);
                                 self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                             }
                         } else {
@@ -244,13 +244,6 @@ impl Manager {
                 return;
             }
         };
-        
-        if self.state.brightness.previous_brightness.is_some() 
-            && self.has_non_instant_action_fired() {
-            if let Err(e) = restore_brightness(&mut self.state).await {
-                sinfo!("Stasis", "Failed to restore brightness: {}", e);
-            }
-        }
         
         let now = Instant::now();
         let debounce = Duration::from_secs(cfg.debounce_seconds as u64);
@@ -516,18 +509,6 @@ impl Manager {
         })
     }
 
-    fn has_non_instant_action_fired(&self) -> bool {
-        let actions = self.state.get_active_actions();
-        
-        for action in actions {
-            if !action.is_instant() && action.last_triggered.is_some() {
-                return true;
-            }
-        }
-        
-        false
-    }
- 
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.inhibitors.manually_paused = true;

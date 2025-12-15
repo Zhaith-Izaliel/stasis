@@ -1,6 +1,5 @@
 use crate::config::model::{IdleActionBlock, IdleAction};
 use crate::core::manager::{
-    brightness::capture_brightness, 
     Manager, 
     processes::{run_command_detached, run_command_silent, is_process_running}
 };
@@ -82,11 +81,6 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
             sdebug!("Stasis", "Lock screen action skipped: already locked");
             return;
         }
-    }
-
-    // Brightness capture
-    if matches!(action.kind, crate::config::model::IdleAction::Brightness) && mgr.state.brightness.previous_brightness.is_none() {
-        let _ = capture_brightness(&mut mgr.state).await;
     }
 
     if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
