@@ -245,6 +245,9 @@ fn log_config_debug(
         }
         if let Some(notification) = &action.notification {
             details.push_str(&format!(", notification=\"{}\"", notification));
+            if let Some(notify_sec) = action.notify_seconds_before {
+                details.push_str(&format!(", notify_seconds_before={}s", notify_sec));
+            }
         }
         sdebug!("Stasis", "{}", &details);
     }
