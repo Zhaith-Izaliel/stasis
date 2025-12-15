@@ -28,7 +28,12 @@ impl Manager {
             .inhibitors
             .refresh_from_profile(config_to_apply.inhibit_apps.clone());
         
-        // Reset app inhibitor state (fast, just clears state)
+        // split manager lock scope
+        {
+            let _mgr = &self.state; // only read what is needed
+        }
+
+        // now call app_inhibitor reset without holding manager lock
         if let Some(app_inhibitor) = &self.state.app.app_inhibitor {
             app_inhibitor.lock().await.reset_inhibitors().await;
         }
@@ -38,14 +43,6 @@ impl Manager {
         
         // Update active profile tracking
         self.state.profile.set_active(profile_name_opt.clone());
-        
-        // ==========================================
-        // NO BLOCKING CHECKS HERE
-        // The background monitors will pick up changes:
-        // - Media monitor checks monitor_media flag every iteration
-        // - App monitor checks inhibit_apps every 4 seconds
-        // - Both will naturally adapt to the new config
-        // ==========================================
         
         Ok(if let Some(name) = profile_name_opt {
             format!("Switched to profile: {}", name)

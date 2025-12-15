@@ -40,15 +40,17 @@ impl AppInhibitor {
     }
 
     pub async fn reset_inhibitors(&mut self) {
-        // Only decrement if we were previously active
-        if self.inhibitor_active {
-            let mut mgr = self.manager.lock().await;
-            decr_active_inhibitor(&mut mgr, InhibitorSource::App).await;
-        }
-
-        // Clear current state
+        // clear active apps immediately
         self.active_apps.clear();
-        self.inhibitor_active = false;
+        if self.inhibitor_active {
+            // spawn a detached task to decrement without holding locks
+            let manager = Arc::clone(&self.manager);
+            tokio::spawn(async move {
+                let mut mgr = manager.lock().await;
+                decr_active_inhibitor(&mut mgr, InhibitorSource::App).await;
+            });
+            self.inhibitor_active = false;
+        }
     }
 
     pub async fn is_any_app_running(&mut self) -> bool {

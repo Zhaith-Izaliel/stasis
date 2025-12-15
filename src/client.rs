@@ -263,13 +263,13 @@ async fn handle_dump(lines: usize) -> eyre::Result<()> {
 }
 
 async fn handle_set_profile(name: &str) -> Result<()> {
-    match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
+    match timeout(Duration::from_secs(4), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             let msg = format!("profile {}", name);
             let _ = stream.write_all(msg.as_bytes()).await;
 
             let mut response = Vec::new();
-            match timeout(Duration::from_secs(2), stream.read_to_end(&mut response)).await {
+            match timeout(Duration::from_secs(8), stream.read_to_end(&mut response)).await {
                 Ok(Ok(_)) => {
                     let response_text = String::from_utf8_lossy(&response);
                     if response_text.starts_with("ERROR:") {
