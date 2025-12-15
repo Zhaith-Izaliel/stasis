@@ -81,6 +81,25 @@ impl AppInhibitor {
         running
     }
 
+    /// Check apps without holding manager lock (for immediate profile change check)
+    /// Returns true if any configured apps are running
+    pub async fn check_apps_immediate(&self) -> bool {
+        let inhibit_apps = {
+            let mgr = self.manager.lock().await;
+            mgr.state.inhibitors.inhibit_apps.clone()
+        };
+
+        if inhibit_apps.is_empty() {
+            return false;
+        }
+
+        // Try compositor check first
+        match self.check_compositor_windows_sync(&inhibit_apps).await {
+            Ok(apps) => !apps.is_empty(),
+            Err(_) => self.check_processes_sync(&inhibit_apps).await,
+        }
+    }
+
     async fn check_processes_with_tracking(&mut self, new_active_apps: &mut HashSet<String>) -> bool {
         let mut any_running = false;
 
@@ -124,6 +143,41 @@ impl AppInhibitor {
         any_running
     }
 
+    /// Synchronous process check (doesn't acquire manager lock)
+    async fn check_processes_sync(&self, inhibit_apps: &[crate::config::model::AppInhibitPattern]) -> bool {
+        let processes_iter = match all_processes() {
+            Ok(iter) => iter,
+            Err(_) => return false,
+        };
+
+        for process in processes_iter {
+            let process = match process {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let proc_name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
+                Ok(name) => name.trim().to_string(),
+                Err(_) => continue,
+            };
+
+            for pattern in inhibit_apps {
+                let matched = match pattern {
+                    crate::config::model::AppInhibitPattern::Literal(s) => {
+                        proc_name.eq_ignore_ascii_case(s)
+                    }
+                    crate::config::model::AppInhibitPattern::Regex(r) => r.is_match(&proc_name),
+                };
+
+                if matched {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     async fn check_compositor_windows(&self) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
         match self.desktop.as_str() {
             "niri" => {
@@ -137,6 +191,29 @@ impl AppInhibitor {
                 Ok(windows.into_iter()
                     .filter_map(|win| win.get("app_id").and_then(|v| v.as_str()).map(|s| s.to_string()))
                     .filter(|app| self.should_inhibit_for_app_sync(app))
+                    .collect())
+            }
+            _ => Err("No IPC available, fallback to process scan".into())
+        }
+    }
+
+    /// Check compositor windows without manager lock
+    async fn check_compositor_windows_sync(
+        &self,
+        inhibit_apps: &[crate::config::model::AppInhibitPattern],
+    ) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
+        match self.desktop.as_str() {
+            "niri" => {
+                let app_ids = self.try_niri_ipc().await?;
+                Ok(app_ids.into_iter()
+                    .filter(|app| Self::should_inhibit_static(app, inhibit_apps))
+                    .collect())
+            }
+            "hyprland" => {
+                let windows = self.try_hyprland_ipc().await?;
+                Ok(windows.into_iter()
+                    .filter_map(|win| win.get("app_id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .filter(|app| Self::should_inhibit_static(app, inhibit_apps))
                     .collect())
             }
             _ => Err("No IPC available, fallback to process scan".into())
@@ -188,7 +265,23 @@ impl AppInhibitor {
         false
     }
 
+    /// Static version that doesn't need self
+    fn should_inhibit_static(app_id: &str, inhibit_apps: &[crate::config::model::AppInhibitPattern]) -> bool {
+        for pattern in inhibit_apps {
+            let matched = match pattern {
+                crate::config::model::AppInhibitPattern::Literal(s) => Self::app_id_matches_static(s, app_id),
+                crate::config::model::AppInhibitPattern::Regex(r) => r.is_match(app_id),
+            };
+            if matched { return true; }
+        }
+        false
+    }
+
     fn app_id_matches(&self, pattern: &str, app_id: &str) -> bool {
+        Self::app_id_matches_static(pattern, app_id)
+    }
+
+    fn app_id_matches_static(pattern: &str, app_id: &str) -> bool {
         if pattern.eq_ignore_ascii_case(app_id) { return true; }
         if app_id.ends_with(".exe") {
             let name = app_id.strip_suffix(".exe").unwrap_or(app_id);
@@ -272,4 +365,3 @@ pub async fn spawn_app_inhibit_task(
 
     (inhibitor, handle)
 }
-

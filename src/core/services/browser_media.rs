@@ -10,7 +10,7 @@ use crate::core::manager::{
 use crate::{media_bridge, sdebug, serror, sinfo};
 
 const POLL_INTERVAL_MS: u64 = 1000;
-const BRIDGE_CHECK_INTERVAL_SECS: u64 = 10;
+const BRIDGE_CHECK_INTERVAL_SECS: u64 = 4;
 
 pub fn is_bridge_available() -> bool {
     media_bridge::is_available()
