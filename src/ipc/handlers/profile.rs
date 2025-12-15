@@ -33,7 +33,7 @@ pub async fn handle_profile(
     tokio::spawn({
         let manager = Arc::clone(&manager);
         async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(4)).await;
             let mut mgr = manager.lock().await;
             mgr.trigger_instant_actions().await;
         }
