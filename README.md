@@ -1,3 +1,5 @@
+> Stasis in going to be stopping development due to mental health reasons. I am unsure when this project will see work on it again.
+
 <p align="center">
   <img src="assets/stasis.png" alt="Stasis Logo" width="200"/>
 </p>
