@@ -110,10 +110,52 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
     mgr.state.media.media_bridge_active = true;
 }
 
-/// Simply clear the active flag - the monitor will clean up
+/// Deactivate bridge and trigger MPRIS recheck for Firefox
 async fn deactivate_browser_monitor(manager: Arc<Mutex<Manager>>) {
+    {
+        let mut mgr = manager.lock().await;
+        mgr.state.media.media_bridge_active = false;
+    }
+    
+    // Trigger full media recheck since MPRIS should now handle Firefox
+    sinfo!("Stasis", "Bridge deactivated, rechecking MPRIS media state");
+    trigger_mpris_recheck(Arc::clone(&manager)).await;
+}
+
+/// Trigger a synchronous recheck of MPRIS media state
+async fn trigger_mpris_recheck(manager: Arc<Mutex<Manager>>) {
+    let (ignore_remote, media_blacklist, bridge_active) = {
+        let mgr = manager.lock().await;
+        let ignore = mgr.state.cfg
+            .as_ref()
+            .map(|c| c.ignore_remote_media)
+            .unwrap_or(false);
+        let blacklist = mgr.state.cfg
+            .as_ref()
+            .map(|c| c.media_blacklist.clone())
+            .unwrap_or_default();
+        (ignore, blacklist, mgr.state.media.media_bridge_active)
+    };
+    
+    let playing = crate::core::services::media::check_media_playing(
+        ignore_remote,
+        &media_blacklist,
+        bridge_active
+    );
+    
     let mut mgr = manager.lock().await;
-    mgr.state.media.media_bridge_active = false;
+    
+    if playing && !mgr.state.media.mpris_media_playing {
+        sinfo!("MPRIS", "Recheck: Media playing detected");
+        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+        mgr.state.media.mpris_media_playing = true;
+    } else if !playing && mgr.state.media.mpris_media_playing {
+        sinfo!("MPRIS", "Recheck: No media playing");
+        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+        mgr.state.media.mpris_media_playing = false;
+    }
+    
+    update_combined_state(&mut mgr);
 }
 
 async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
@@ -209,6 +251,10 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                                 let empty_state = media_bridge::BrowserMediaState::empty();
                                 update_manager_state(manager.clone(), &empty_state, last_state.as_ref()).await;
                                 last_state = None;
+                                
+                                // Trigger MPRIS recheck since bridge is now unavailable
+                                sinfo!("Stasis", "Bridge disconnected, rechecking MPRIS media state");
+                                trigger_mpris_recheck(Arc::clone(&manager)).await;
                             }
                         }
                     }

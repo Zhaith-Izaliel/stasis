@@ -48,7 +48,11 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             .build();
 
         let mut stream = MessageStream::for_match_rule(rule, &conn, None).await.unwrap();
-
+        
+        // Conditional polling - only poll when something is playing
+        let mut poll_interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+        let mut should_poll = false; // Start with polling disabled
+        
         // Initial check
         {
             let monitor_enabled = {
@@ -59,34 +63,12 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             if !monitor_enabled {
                 sdebug!("MPRIS", "Media monitoring disabled by config, skipping initial check");
             } else {
-                let (ignore_remote_media, media_blacklist, bridge_active) = {
-                    let mgr = manager.lock().await;
-                    let ignore = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.ignore_remote_media)
-                        .unwrap_or(false);
-                    let blacklist = mgr.state.cfg
-                        .as_ref()
-                        .map(|c| c.media_blacklist.clone())
-                        .unwrap_or_default();
-                    (ignore, blacklist, mgr.state.media.media_bridge_active)
-                };
-
-                let playing = check_media_playing(
-                    ignore_remote_media,
-                    &media_blacklist,
-                    bridge_active
-                );
-                
-                if playing {
-                    let mut mgr = manager.lock().await;
-                    if !mgr.state.media.mpris_media_playing {
-                        sinfo!("MPRIS", "Initial check: media playing");
-                        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
-                        mgr.state.media.mpris_media_playing = true;
-                        mgr.state.media.media_playing = true;
-                        mgr.state.media.media_blocking = true;
-                    }
+                let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
+                should_poll = any_playing;
+                if any_playing {
+                    sdebug!("MPRIS", "Initial check: media playing, polling enabled");
+                } else {
+                    sdebug!("MPRIS", "Initial check: no media, polling disabled");
                 }
             }
         }
@@ -96,12 +78,33 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             mgr.state.shutdown_flag.clone()
         };
 
-        // Monitor MPRIS changes
+        // Monitor MPRIS changes AND poll pactl when needed
         loop {
             tokio::select! {
                 _ = shutdown.notified() => {
                     sinfo!("MPRIS", "Media monitor shutting down...");
                     break;
+                }
+                
+                _ = poll_interval.tick(), if should_poll => {
+                    let monitor_enabled = {
+                        let mgr = manager.lock().await;
+                        mgr.state.cfg.as_ref().map(|c| c.monitor_media).unwrap_or(true)
+                    };
+                    
+                    if !monitor_enabled {
+                        continue;
+                    }
+                    
+                    // Periodic check - catches cases where MPRIS doesn't fire events
+                    sdebug!("MPRIS", "Periodic pactl check (polling enabled)");
+                    let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
+                    
+                    // Disable polling if nothing is playing anymore
+                    if !any_playing {
+                        should_poll = false;
+                        sdebug!("MPRIS", "All media stopped/paused, disabling polling");
+                    }
                 }
                 
                 msg = stream.next() => {
@@ -115,53 +118,67 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     };
                     
                     if !monitor_enabled {
-                        // Skip processing if monitoring is disabled
                         sdebug!("MPRIS", "Media monitoring disabled, skipping event");
                         continue;
                     }
                     
-                    let (ignore_remote_media, media_blacklist, bridge_active) = {
-                        let mgr = manager.lock().await;
-                        let ignore = mgr.state.cfg
-                            .as_ref()
-                            .map(|c| c.ignore_remote_media)
-                            .unwrap_or(false);
-                        let blacklist = mgr.state.cfg
-                            .as_ref()
-                            .map(|c| c.media_blacklist.clone())
-                            .unwrap_or_default();
-                        (ignore, blacklist, mgr.state.media.media_bridge_active)
-                    };
-
-                    let any_playing = check_media_playing(
-                        ignore_remote_media,
-                        &media_blacklist,
-                        bridge_active
-                    );
+                    // MPRIS event - check immediately
+                    sdebug!("MPRIS", "MPRIS event detected");
+                    let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                     
-                    let mut mgr = manager.lock().await;
-                    
-                    if any_playing && !mgr.state.media.mpris_media_playing {
-                        sdebug!("MPRIS", "Media started");
-                        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
-                        mgr.state.media.mpris_media_playing = true;
-                    } else if !any_playing && mgr.state.media.mpris_media_playing {
-                        if !bridge_active && has_playerctl_players() && has_any_media_playing() {
-                            continue;
-                        }
-                       
-                        sdebug!("MPRIS", "Media stopped");
-                        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
-                        mgr.state.media.mpris_media_playing = false;
+                    // Enable polling if something started playing
+                    if any_playing && !should_poll {
+                        should_poll = true;
+                        sdebug!("MPRIS", "Media started playing, enabling polling");
+                    } else if !any_playing && should_poll {
+                        should_poll = false;
+                        sdebug!("MPRIS", "All media stopped, disabling polling");
                     }
-                    
-                    update_combined_state(&mut mgr);
                 }
             }
         }
     });
     
     Ok(())
+}
+
+/// Check media state and update manager accordingly
+/// Returns true if any media is playing, false otherwise
+async fn check_and_update_media_state(manager: Arc<tokio::sync::Mutex<Manager>>) -> bool {
+    let (ignore_remote_media, media_blacklist, bridge_active) = {
+        let mgr = manager.lock().await;
+        let ignore = mgr.state.cfg
+            .as_ref()
+            .map(|c| c.ignore_remote_media)
+            .unwrap_or(false);
+        let blacklist = mgr.state.cfg
+            .as_ref()
+            .map(|c| c.media_blacklist.clone())
+            .unwrap_or_default();
+        (ignore, blacklist, mgr.state.media.media_bridge_active)
+    };
+
+    let any_playing = check_media_playing(
+        ignore_remote_media,
+        &media_blacklist,
+        bridge_active
+    );
+    
+    let mut mgr = manager.lock().await;
+    
+    if any_playing && !mgr.state.media.mpris_media_playing {
+        sdebug!("MPRIS", "Media started");
+        incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+        mgr.state.media.mpris_media_playing = true;
+    } else if !any_playing && mgr.state.media.mpris_media_playing {
+        sdebug!("MPRIS", "Media stopped");
+        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+        mgr.state.media.mpris_media_playing = false;
+    }
+    
+    update_combined_state(&mut mgr);
+    
+    any_playing
 }
 
 
@@ -178,7 +195,22 @@ pub fn check_media_playing(
     media_blacklist: &[String],
     skip_firefox: bool
 ) -> bool {
-    // Get all playing MPRIS players
+    // PRIMARY CHECK: pactl for Firefox/browsers (unless bridge is handling it)
+    // This is more reliable than MPRIS for multi-tab scenarios
+    if !skip_firefox {
+        if has_playerctl_players() {
+            let has_uncorked = has_any_uncorked_audio();
+            sdebug!("MPRIS", "Firefox pactl check: playerctl_players=true, uncorked_audio={}", has_uncorked);
+            if has_uncorked {
+                return true;
+            }
+            // If we have playerctl players but no uncorked audio, Firefox is definitely paused
+            // Don't check MPRIS for Firefox - pactl is the source of truth
+            sdebug!("MPRIS", "Firefox tabs exist but all audio is corked - Firefox is paused");
+        }
+    }
+
+    // SECONDARY CHECK: MPRIS for non-Firefox players (or if Firefox check was skipped)
     let playing_players = match PlayerFinder::new() {
         Ok(finder) => match finder.find_all() {
             Ok(players) => {
@@ -194,20 +226,17 @@ pub fn check_media_playing(
     };
 
     if playing_players.is_empty() {
+        sdebug!("MPRIS", "No MPRIS players reporting as playing");
         return false;
     }
 
-    // Fallback for multi-tab Firefox (only if we're NOT skipping Firefox)
-    if !skip_firefox && has_playerctl_players() && has_any_media_playing() {
-        return true;
-    }
-
-    // Check each player
+    // Check each MPRIS player (skipping Firefox if we already checked pactl)
     for player in playing_players {
         let identity = player.identity().to_lowercase();
         
-        // Skip Firefox if the bridge is handling it
-        if skip_firefox && identity.contains("firefox") {
+        // Skip Firefox if we're not skipping it - we already checked pactl above
+        if !skip_firefox && identity.contains("firefox") {
+            sdebug!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl)");
             continue;
         }
 
@@ -221,6 +250,7 @@ pub fn check_media_playing(
         });
         
         if is_blacklisted {
+            sdebug!("MPRIS", "Player blacklisted: {}", identity);
             continue;
         }
         
@@ -230,35 +260,60 @@ pub fn check_media_playing(
         });
         
         if is_always_local {
+            sdebug!("MPRIS", "Local player detected via MPRIS: {}", identity);
             return true;
         }
         
         if ignore_remote_media {
             if is_player_local_by_pactl(&identity) {
+                sdebug!("MPRIS", "Remote media check passed for: {}", identity);
                 return true;
             } else {
+                sdebug!("MPRIS", "Ignoring remote player: {}", identity);
                 continue;
             }
         } else {
+            sdebug!("MPRIS", "Player detected via MPRIS: {}", identity);
             return true;
         }
     }
     
+    sdebug!("MPRIS", "No valid playing media detected");
     false
 }
 
-fn has_any_media_playing() -> bool {
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    
+/// Check if there's any audio that's actually playing (not corked/paused)
+fn has_any_uncorked_audio() -> bool {
     let output = match Command::new("pactl")
-        .args(["list", "sink-inputs", "short"])
+        .args(["list", "sink-inputs"])
         .output() {
         Ok(o) => o,
         Err(_) => return false,
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    !stdout.trim().is_empty()
+    
+    // Parse pactl output to find any sink input that is NOT corked
+    let mut current_sink_has_audio = false;
+    
+    for line in stdout.lines() {
+        let line_trimmed = line.trim();
+        
+        // New sink input section
+        if line_trimmed.starts_with("Sink Input #") {
+            current_sink_has_audio = true;
+        }
+        // Check corked status for current sink
+        else if current_sink_has_audio && line_trimmed.starts_with("Corked:") {
+            // "Corked: no" means audio is playing
+            if line_trimmed.contains("no") {
+                return true;
+            }
+            current_sink_has_audio = false;
+        }
+    }
+    
+    false
 }
 
 fn has_playerctl_players() -> bool {
