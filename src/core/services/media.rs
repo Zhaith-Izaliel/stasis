@@ -97,6 +97,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     }
                     
                     // Periodic check - catches cases where MPRIS doesn't fire events
+                    // Note: If bridge is active, check_media_playing will skip Firefox
                     sdebug!("MPRIS", "Periodic pactl check (polling enabled)");
                     let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                     
@@ -123,6 +124,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     }
                     
                     // MPRIS event - check immediately
+                    // Note: If bridge is active, check_media_playing will skip Firefox
                     sdebug!("MPRIS", "MPRIS event detected");
                     let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                     
@@ -158,21 +160,21 @@ async fn check_and_update_media_state(manager: Arc<tokio::sync::Mutex<Manager>>)
         (ignore, blacklist, mgr.state.media.media_bridge_active)
     };
 
-    // note: now awaiting the async check_media_playing
+    // check_media_playing will skip Firefox if bridge_active is true
     let any_playing = check_media_playing(
         ignore_remote_media,
         &media_blacklist,
-        bridge_active
+        bridge_active  // This tells it to skip Firefox
     ).await;
 
     let mut mgr = manager.lock().await;
     
     if any_playing && !mgr.state.media.mpris_media_playing {
-        sdebug!("MPRIS", "Media started");
+        sdebug!("MPRIS", "Media started (non-Firefox or bridge inactive)");
         incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         mgr.state.media.mpris_media_playing = true;
     } else if !any_playing && mgr.state.media.mpris_media_playing {
-        sdebug!("MPRIS", "Media stopped");
+        sdebug!("MPRIS", "Media stopped (no non-Firefox players)");
         decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         mgr.state.media.mpris_media_playing = false;
     }
@@ -236,9 +238,11 @@ pub async fn check_media_playing(
             // After consulting MPRIS and retrying pactl briefly, treat as paused and continue to check others.
             sdebug!("MPRIS", "Firefox/browser players appear corked/paused after retries");
         }
+    } else {
+        sdebug!("MPRIS", "Skipping Firefox checks (bridge is active)");
     }
 
-    // SECONDARY CHECK: MPRIS for non-Firefox players (or if Firefox check was skipped)
+    // SECONDARY CHECK: MPRIS for non-Firefox players (or all players if Firefox check was skipped)
     let playing_players = match PlayerFinder::new() {
         Ok(finder) => match finder.find_all() {
             Ok(players) => {
@@ -262,9 +266,12 @@ pub async fn check_media_playing(
     for player in playing_players {
         let identity = player.identity().to_lowercase();
         
-        // If we did the pactl check and it indicated firefox players exist, we already handled transient case above.
-        if !skip_firefox && identity.contains("firefox") {
-            sdebug!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl fallback)");
+        // If skip_firefox is true (bridge is handling it), skip all Firefox/browser players
+        if skip_firefox && (identity.contains("firefox") || identity.contains("chrome") || 
+                           identity.contains("chromium") || identity.contains("brave") ||
+                           identity.contains("opera") || identity.contains("vivaldi") ||
+                           identity.contains("edge")) {
+            sdebug!("MPRIS", "Skipping browser player {} (bridge is handling)", identity);
             continue;
         }
 

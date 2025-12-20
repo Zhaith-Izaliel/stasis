@@ -80,12 +80,14 @@ pub async fn spawn_browser_bridge_detector(manager: Arc<Mutex<Manager>>) {
     });
 }
 
-/// Simply set the active flag - the monitor checks this dynamically
+/// Activate bridge monitoring - check if we need to clear MPRIS inhibitor
 async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
-    let mut mgr = manager.lock().await;
+    sinfo!("Media Bridge", "Taking over Firefox monitoring from MPRIS");
     
-    if mgr.state.media.mpris_media_playing {
-        let ignore_remote = mgr.state.cfg
+    // Check if there are non-Firefox players still playing
+    let (ignore_remote, blacklist, mpris_active) = {
+        let mgr = manager.lock().await;
+        let ignore = mgr.state.cfg
             .as_ref()
             .map(|c| c.ignore_remote_media)
             .unwrap_or(false);
@@ -93,32 +95,63 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
             .as_ref()
             .map(|c| c.media_blacklist.clone())
             .unwrap_or_default();
-        
-        let non_ff_playing = crate::core::services::media::check_media_playing(
-            ignore_remote,
-            &blacklist,
-            true
-        ).await;
-        
-        if !non_ff_playing {
-            sinfo!("Stasis", "Clearing MPRIS inhibitors (Firefox transitioning to bridge)");
-            decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
-            mgr.state.media.mpris_media_playing = false;
-        }
+        (ignore, blacklist, mgr.state.media.mpris_media_playing)
+    };
+    
+    // Check for non-Firefox players (skip_firefox=true means only check non-Firefox)
+    let non_firefox_playing = crate::core::services::media::check_media_playing(
+        ignore_remote,
+        &blacklist,
+        true  // skip_firefox=true, so we only detect non-Firefox players
+    ).await;
+    
+    let mut mgr = manager.lock().await;
+    
+    // Only clear MPRIS inhibitor if ONLY Firefox was playing (no other players)
+    if mpris_active && !non_firefox_playing {
+        sinfo!("Media Bridge", "Only Firefox was playing, clearing MPRIS inhibitor");
+        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+        mgr.state.media.mpris_media_playing = false;
+    } else if mpris_active && non_firefox_playing {
+        sinfo!("Media Bridge", "Non-Firefox players still active, keeping MPRIS inhibitor");
+        // MPRIS will continue monitoring non-Firefox players
     }
     
+    // Activate bridge - this signals MPRIS to skip Firefox checks
     mgr.state.media.media_bridge_active = true;
+    
+    update_combined_state(&mut mgr);
+    
+    sdebug!("Media Bridge", "Bridge activated, MPRIS will skip Firefox");
 }
 
-/// Deactivate bridge and trigger MPRIS recheck for Firefox
+/// Deactivate bridge and hand back to MPRIS
 async fn deactivate_browser_monitor(manager: Arc<Mutex<Manager>>) {
+    sinfo!("Media Bridge", "Handing Firefox monitoring back to MPRIS");
+    
+    // First, clear all bridge inhibitors
     {
         let mut mgr = manager.lock().await;
+        let tab_count = mgr.state.media.browser_playing_tab_count;
+        
+        if tab_count > 0 {
+            sdebug!("Media Bridge", "Clearing {} browser tab inhibitors", tab_count);
+            for _ in 0..tab_count {
+                decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+            }
+        }
+        
+        mgr.state.media.browser_playing_tab_count = 0;
+        mgr.state.media.browser_media_playing = false;
+        
+        // Deactivate bridge - this allows MPRIS to resume checking Firefox
         mgr.state.media.media_bridge_active = false;
+        
+        update_combined_state(&mut mgr);
     }
     
-    // Trigger full media recheck since MPRIS should now handle Firefox
-    sinfo!("Stasis", "Bridge deactivated, rechecking MPRIS media state");
+    // Now let MPRIS check Firefox and set its own state
+    sdebug!("Media Bridge", "Bridge deactivated, triggering MPRIS recheck");
     trigger_mpris_recheck(Arc::clone(&manager)).await;
 }
 
@@ -137,16 +170,22 @@ async fn trigger_mpris_recheck(manager: Arc<Mutex<Manager>>) {
         (ignore, blacklist, mgr.state.media.media_bridge_active)
     };
     
+    // Bridge should be inactive at this point
+    if bridge_active {
+        serror!("MPRIS", "Bridge still active during recheck - this shouldn't happen");
+        return;
+    }
+    
     let playing = crate::core::services::media::check_media_playing(
         ignore_remote,
         &media_blacklist,
-        bridge_active
+        bridge_active  // Should be false, so Firefox will be checked
     ).await;
     
     let mut mgr = manager.lock().await;
     
     if playing && !mgr.state.media.mpris_media_playing {
-        sinfo!("MPRIS", "Recheck: Media playing detected");
+        sinfo!("MPRIS", "Recheck: Media playing detected (including Firefox)");
         incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         mgr.state.media.mpris_media_playing = true;
     } else if !playing && mgr.state.media.mpris_media_playing {
@@ -215,7 +254,7 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                         continue;
                     }
                     
-                    // ✅ Skip processing if monitoring is disabled or bridge not active
+                    // Skip processing if monitoring is disabled or bridge not active
                     if !monitor_enabled || !bridge_active {
                         was_monitoring = false;
                         continue;
@@ -248,9 +287,25 @@ async fn spawn_browser_media_monitor(manager: Arc<Mutex<Manager>>) {
                                 serror!("Stasis", "Lost connection to media bridge");
                                 connected = false;
                                 
-                                let empty_state = media_bridge::BrowserMediaState::empty();
-                                update_manager_state(manager.clone(), &empty_state, last_state.as_ref()).await;
+                                // Clear bridge state before handing off to MPRIS
+                                let mut mgr = manager.lock().await;
+                                let tab_count = mgr.state.media.browser_playing_tab_count;
+                                
+                                if tab_count > 0 {
+                                    sdebug!("Media Bridge", "Clearing {} inhibitors due to disconnection", tab_count);
+                                    for _ in 0..tab_count {
+                                        decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
+                                    }
+                                }
+                                
+                                mgr.state.media.browser_playing_tab_count = 0;
+                                mgr.state.media.browser_media_playing = false;
+                                update_combined_state(&mut mgr);
+                                
                                 last_state = None;
+                                
+                                // Drop the lock before triggering recheck
+                                drop(mgr);
                                 
                                 // Trigger MPRIS recheck since bridge is now unavailable
                                 sinfo!("Stasis", "Bridge disconnected, rechecking MPRIS media state");

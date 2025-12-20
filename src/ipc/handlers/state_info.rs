@@ -30,14 +30,7 @@ pub async fn collect_full_state(
 pub fn collect_manager_state(mgr: &mut Manager) -> StateInfo {
     // ✅ Check if app blocking is active by checking inhibitor count
     // The AppInhibitor background task updates this when apps are detected    
-    let app_blocking = if mgr.state.inhibitors.active_inhibitor_count == 0 {
-        false
-    } else {
-        // Count only app inhibitors by ignoring media
-        let media_inhibitors = if mgr.state.media.media_blocking { 1 } else { 0 };
-        mgr.state.inhibitors.active_inhibitor_count > media_inhibitors
-            && !mgr.state.inhibitors.inhibit_apps.is_empty()
-    };
+    let app_blocking = mgr.state.inhibitors.active_app_inhibitors > 0;
     
     StateInfo {
         idle_time: mgr.state.timing.last_activity.elapsed(),

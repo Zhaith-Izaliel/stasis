@@ -1,7 +1,6 @@
 use crate::core::manager::{inhibitors::{decr_active_inhibitor, incr_active_inhibitor, InhibitorSource}, Manager};
 use crate::sdebug;
 
-
 /// Manages media playback state from multiple sources
 #[derive(Debug, Default, Clone)]
 pub struct MediaState {
