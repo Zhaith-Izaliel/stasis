@@ -98,7 +98,7 @@ async fn activate_browser_monitor(manager: Arc<Mutex<Manager>>) {
             ignore_remote,
             &blacklist,
             true
-        );
+        ).await;
         
         if !non_ff_playing {
             sinfo!("Stasis", "Clearing MPRIS inhibitors (Firefox transitioning to bridge)");
@@ -141,7 +141,7 @@ async fn trigger_mpris_recheck(manager: Arc<Mutex<Manager>>) {
         ignore_remote,
         &media_blacklist,
         bridge_active
-    );
+    ).await;
     
     let mut mgr = manager.lock().await;
     

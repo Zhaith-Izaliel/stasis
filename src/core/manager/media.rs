@@ -21,7 +21,7 @@ impl Manager {
             ignore_remote,
             &media_blacklist,
             false,
-        );
+        ).await;
 
         // Only change state via the helpers so behaviour stays consistent
         if playing && !self.state.media.media_playing {

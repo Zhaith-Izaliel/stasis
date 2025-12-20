@@ -1,8 +1,8 @@
-use std::{process::Command, sync::Arc};
+use std::{process::Command, sync::Arc, time::Duration};
 use eyre::Result;
 use futures_util::stream::StreamExt;
 use mpris::{PlayerFinder, PlaybackStatus};
-use tokio::task;
+use tokio::{task, time::sleep};
 use zbus::{Connection, MatchRule, MessageStream};
 
 use crate::{core::manager::{
@@ -158,12 +158,13 @@ async fn check_and_update_media_state(manager: Arc<tokio::sync::Mutex<Manager>>)
         (ignore, blacklist, mgr.state.media.media_bridge_active)
     };
 
+    // note: now awaiting the async check_media_playing
     let any_playing = check_media_playing(
         ignore_remote_media,
         &media_blacklist,
         bridge_active
-    );
-    
+    ).await;
+
     let mut mgr = manager.lock().await;
     
     if any_playing && !mgr.state.media.mpris_media_playing {
@@ -181,8 +182,6 @@ async fn check_and_update_media_state(manager: Arc<tokio::sync::Mutex<Manager>>)
     any_playing
 }
 
-
-
 /// Update the combined media_playing and media_blocking flags based on all sources
 fn update_combined_state(mgr: &mut Manager) {
     let combined = mgr.state.media.mpris_media_playing || mgr.state.media.browser_media_playing;
@@ -190,23 +189,52 @@ fn update_combined_state(mgr: &mut Manager) {
     mgr.state.media.media_blocking = combined;
 }
 
-pub fn check_media_playing(
+/// Make this async now
+pub async fn check_media_playing(
     ignore_remote_media: bool,
     media_blacklist: &[String],
     skip_firefox: bool
 ) -> bool {
     // PRIMARY CHECK: pactl for Firefox/browsers (unless bridge is handling it)
-    // This is more reliable than MPRIS for multi-tab scenarios
     if !skip_firefox {
         if has_playerctl_players() {
             let has_uncorked = has_any_uncorked_audio();
             sdebug!("MPRIS", "Firefox pactl check: playerctl_players=true, uncorked_audio={}", has_uncorked);
+
             if has_uncorked {
                 return true;
             }
-            // If we have playerctl players but no uncorked audio, Firefox is definitely paused
-            // Don't check MPRIS for Firefox - pactl is the source of truth
-            sdebug!("MPRIS", "Firefox tabs exist but all audio is corked - Firefox is paused");
+
+            // NEW: The transient case — consult MPRIS for browser players as a *fast* fallback
+            // Because MPRIS may already report Playing before pactl uncorks the stream.
+            sdebug!("MPRIS", "playerctl players exist but audio corked; checking MPRIS playback status for browser players");
+            if let Ok(finder) = PlayerFinder::new() {
+                if let Ok(players) = finder.find_all() {
+                    for player in players.into_iter() {
+                        let id = player.identity().to_lowercase();
+                        // only check browser/firefox identity here
+                        if id.contains("firefox") || id.contains("chrome") || id.contains("chromium") {
+                            if player.get_playback_status().map(|s| s == PlaybackStatus::Playing).unwrap_or(false) {
+                                sdebug!("MPRIS", "Browser MPRIS reports Playing (transient) for: {}", id);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also retry pactl a few short times before concluding paused (covers very short resume windows)
+            for i in 0..3 {
+                let backoff_ms = 50 * (i + 1); // 50, 100, 150 ms
+                sleep(Duration::from_millis(backoff_ms)).await;
+                if has_any_uncorked_audio() {
+                    sdebug!("MPRIS", "pactl detected uncorked audio after {}ms retry", backoff_ms);
+                    return true;
+                }
+            }
+
+            // After consulting MPRIS and retrying pactl briefly, treat as paused and continue to check others.
+            sdebug!("MPRIS", "Firefox/browser players appear corked/paused after retries");
         }
     }
 
@@ -230,13 +258,13 @@ pub fn check_media_playing(
         return false;
     }
 
-    // Check each MPRIS player (skipping Firefox if we already checked pactl)
+    // Check each MPRIS player (skipping Firefox if we already checked pactl in the "primary" stage)
     for player in playing_players {
         let identity = player.identity().to_lowercase();
         
-        // Skip Firefox if we're not skipping it - we already checked pactl above
+        // If we did the pactl check and it indicated firefox players exist, we already handled transient case above.
         if !skip_firefox && identity.contains("firefox") {
-            sdebug!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl)");
+            sdebug!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl fallback)");
             continue;
         }
 
@@ -281,6 +309,7 @@ pub fn check_media_playing(
     sdebug!("MPRIS", "No valid playing media detected");
     false
 }
+
 
 /// Check if there's any audio that's actually playing (not corked/paused)
 fn has_any_uncorked_audio() -> bool {
