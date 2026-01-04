@@ -25,3 +25,29 @@ pub struct CombinedConfig {
     pub profiles: Vec<super::Profile>,
     pub active_profile: Option<String>,
 }
+
+impl Default for StasisConfig {
+    fn default() -> Self {
+        Self {
+            actions: Vec::new(),
+            debounce_seconds: 0,
+            inhibit_apps: Vec::new(),
+
+            monitor_media: false,
+            ignore_remote_media: false,
+            media_blacklist: Vec::new(),
+
+            pre_suspend_command: None,
+            respect_wayland_inhibitors: false,
+
+            lid_close_action: LidCloseAction::Ignore,
+            lid_open_action: LidOpenAction::Ignore,
+
+            notify_on_unpause: false,
+            notify_before_action: false,
+            notify_seconds_before: 0,
+
+            lock_detection_type: LockDetectionType::Process,
+        }
+    }
+}

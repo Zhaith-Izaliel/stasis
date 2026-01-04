@@ -21,7 +21,7 @@ impl MediaState {
             self.media_playing
         }
     }
-
+    
     pub fn get_inhibitor_count(&self) -> usize {
         if self.media_bridge_active {
             self.browser_playing_tab_count
@@ -31,7 +31,7 @@ impl MediaState {
             0
         }
     }
-
+    
     pub async fn force_stop_media(&mut self, mgr: &mut Manager) {
         if self.is_any_playing() {
             decr_active_inhibitor(mgr, InhibitorSource::Media).await;
@@ -42,7 +42,7 @@ impl MediaState {
             self.browser_playing_tab_count = 0;
         }
     }
-
+    
     pub async fn restore_media(&mut self, mgr: &mut Manager, previous_state: &MediaState) {
         if previous_state.is_any_playing() {
             incr_active_inhibitor(mgr, InhibitorSource::Media).await;
@@ -53,7 +53,40 @@ impl MediaState {
             self.browser_playing_tab_count = previous_state.browser_playing_tab_count;
         }
     }
-
+    
+    /// Reset media state for profile changes
+    /// 
+    /// CRITICAL: Browser tabs use per-tab inhibitor counting!
+    /// Must decrement once for MPRIS + once PER BROWSER TAB
+    pub async fn reset_for_profile_change(&mut self, mgr: &mut Manager) {
+        sdebug!("Stasis", "Resetting media state for profile change");
+        
+        // MPRIS: decrement once if active
+        if self.mpris_media_playing {
+            sdebug!("Stasis", "Clearing MPRIS media inhibitor");
+            decr_active_inhibitor(mgr, InhibitorSource::Media).await;
+        }
+        
+        // Browser: decrement once PER TAB (each tab increments separately!)
+        let tab_count = self.browser_playing_tab_count;
+        if tab_count > 0 {
+            sdebug!("Stasis", "Clearing {} browser tab inhibitors", tab_count);
+            for _ in 0..tab_count {
+                decr_active_inhibitor(mgr, InhibitorSource::Media).await;
+            }
+        }
+        
+        // Clear all state
+        self.media_playing = false;
+        self.media_blocking = false;
+        self.mpris_media_playing = false;
+        self.browser_media_playing = false;
+        self.browser_playing_tab_count = 0;
+        // Don't reset media_bridge_active - it's independent of profile
+        
+        sdebug!("Stasis", "Media state reset complete");
+    }
+    
     pub fn log_state(&self) { 
         sdebug!(
             "Media",

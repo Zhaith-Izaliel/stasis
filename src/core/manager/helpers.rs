@@ -180,22 +180,31 @@ pub fn current_profile(mgr: &mut Manager) -> Option<String> {
 }
 
 pub fn profile_to_stasis_config(profile: &crate::config::model::Profile) -> StasisConfig {
-    
-    StasisConfig {
-        actions: profile.actions.clone(),
-        debounce_seconds: profile.debounce_seconds,
-        inhibit_apps: profile.inhibit_apps.clone(),
-        monitor_media: profile.monitor_media,
-        ignore_remote_media: profile.ignore_remote_media,
-        media_blacklist: profile.media_blacklist.clone(),
-        pre_suspend_command: profile.pre_suspend_command.clone(),
-        respect_wayland_inhibitors: profile.respect_wayland_inhibitors.clone(),
-        lid_close_action: profile.lid_close_action.clone(),
-        lid_open_action: profile.lid_open_action.clone(),
-        notify_on_unpause: profile.notify_on_unpause,
-        notify_before_action: profile.notify_before_action,
-        notify_seconds_before: profile.notify_seconds_before,
-        lock_detection_type: profile.lock_detection_type.clone(),
-    }
-}
+    let mut cfg = StasisConfig::default();
 
+    // Only copy fields if the profile has non-default value
+    if !profile.actions.is_empty() {
+        cfg.actions = profile.actions.clone();
+    }
+    if profile.debounce_seconds != 0 {
+        cfg.debounce_seconds = profile.debounce_seconds;
+    }
+    if !profile.inhibit_apps.is_empty() {
+        cfg.inhibit_apps = profile.inhibit_apps.clone();
+    }
+    cfg.monitor_media = profile.monitor_media; // keep false if not set
+    cfg.ignore_remote_media = profile.ignore_remote_media;
+    if !profile.media_blacklist.is_empty() {
+        cfg.media_blacklist = profile.media_blacklist.clone();
+    }
+    cfg.pre_suspend_command = profile.pre_suspend_command.clone();
+    cfg.respect_wayland_inhibitors = profile.respect_wayland_inhibitors;
+    cfg.lid_close_action = profile.lid_close_action.clone();
+    cfg.lid_open_action = profile.lid_open_action.clone();
+    cfg.notify_on_unpause = profile.notify_on_unpause;
+    cfg.notify_before_action = profile.notify_before_action;
+    cfg.notify_seconds_before = profile.notify_seconds_before;
+    cfg.lock_detection_type = profile.lock_detection_type.clone();
+
+    cfg
+}

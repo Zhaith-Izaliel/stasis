@@ -14,7 +14,6 @@ pub async fn handle_info(
     loop {
         match manager.try_lock() {
             Ok(mut mgr) => {
-                // ✅ No need for app_inhibitor - state is in manager.state.inhibitors
                 let state = collect_manager_state(&mut mgr);
                 drop(mgr);
                 

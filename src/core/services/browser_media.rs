@@ -157,6 +157,13 @@ async fn deactivate_browser_monitor(manager: Arc<Mutex<Manager>>) {
 
 /// Trigger a synchronous recheck of MPRIS media state
 async fn trigger_mpris_recheck(manager: Arc<Mutex<Manager>>) {
+    {
+        let mgr = manager.lock().await;
+        if !mgr.state.cfg.as_ref().map(|c| c.monitor_media).unwrap_or(true) {
+            sdebug!("MPRIS", "Recheck skipped: media monitoring disabled");
+            return;
+        }
+    }
     let (ignore_remote, media_blacklist, bridge_active) = {
         let mgr = manager.lock().await;
         let ignore = mgr.state.cfg
