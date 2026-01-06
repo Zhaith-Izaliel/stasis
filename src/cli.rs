@@ -9,8 +9,10 @@ use std::path::PathBuf;
 pub struct Args {
     #[arg(short, long, value_name = "FILE")]
     pub config: Option<PathBuf>,
+    
     #[arg(short, long, action)]
     pub verbose: bool,
+    
     #[command(subcommand)]
     pub command: Option<Command>
 }
@@ -59,14 +61,17 @@ pub enum Command {
     Info {
         #[arg(long, help = "Output as JSON (for Waybar or scripts)")]
         json: bool,
+        
+        #[arg(help = "Section to display: 'status', 'config', 'actions', or combinations like 'status,config'")]
+        section: Option<String>,
     },
-
+ 
     #[command(about = "Dump recent log lines (for debugging)")]
     Dump {
         #[arg(default_value_t = 20, help = "Number of recent lines to show")]
         lines: usize,
     },
-
+    
     #[command(about = "Switch to a specific profile or back to base config")]
     Profile {
         #[arg(help = "Profile name to activate, or 'none' to use base config")]

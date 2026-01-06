@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::time::Duration;
 use crate::{
-    config::{self, model::CombinedConfig},
+    config::{self, model::CombinedConfig, info::InfoSections},
     core::manager::{Manager, helpers::profile_to_stasis_config},
     sdebug, serror, sinfo, swarn,
 };
@@ -95,7 +95,8 @@ async fn reload_config_internal(
     
     sdebug!("Stasis", "Config reloaded successfully: {}", profile_status);
     
-    format_text_response(&state_info, Some(&format!("Config reloaded successfully\n{}", profile_status)))
+    let info_output = format_text_response(&state_info, InfoSections::default());
+    format!("Config reloaded successfully\n{}\n\n{}", profile_status, info_output)
 }
 
 async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {

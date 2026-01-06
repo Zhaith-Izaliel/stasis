@@ -12,8 +12,10 @@ use crate::{cli::Command, SOCKET_PATH};
 use crate::log::log_path;
 
 pub async fn handle_client_command(cmd: &Command) -> Result<()> {
-    match cmd {
-        Command::Info { json } => handle_info(*json).await,
+    match cmd {    
+        Command::Info { json, section } => {
+            handle_info(*json, section.clone()).await
+        },
         Command::Trigger { step } => handle_trigger(step).await,
         Command::List { args } => handle_list(args).await,
         Command::Pause { args } => handle_pause(args).await,
@@ -26,10 +28,23 @@ pub async fn handle_client_command(cmd: &Command) -> Result<()> {
     }
 }
 
-async fn handle_info(json: bool) -> Result<()> {
+async fn handle_info(json: bool, section: Option<String>) -> Result<()> {
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
-            let msg = if json { "info --json" } else { "info" };
+            // Build the command string
+            let mut msg = String::from("info");
+            
+            // Add section if specified
+            if let Some(s) = section {
+                msg.push(' ');
+                msg.push_str(&s);
+            }
+            
+            // Add JSON flag if specified
+            if json {
+                msg.push_str(" --json");
+            }
+
             let _ = stream.write_all(msg.as_bytes()).await;
 
             let mut response = Vec::new();

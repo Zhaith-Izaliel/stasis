@@ -1,8 +1,11 @@
 use std::sync::Arc;
 use tokio::time::Duration;
-use crate::core::{
-    manager::{Manager, helpers::{current_profile, list_profiles}},
-    utils::format_duration,
+use crate::{
+    core::{
+        manager::{Manager, helpers::{current_profile, list_profiles}},
+        utils::format_duration,
+    },
+    config::info::InfoSections,
 };
 
 pub struct StateInfo {
@@ -28,8 +31,6 @@ pub async fn collect_full_state(
 
 /// Collects state information from manager only (sync)
 pub fn collect_manager_state(mgr: &mut Manager) -> StateInfo {
-    // ✅ Check if app blocking is active by checking inhibitor count
-    // The AppInhibitor background task updates this when apps are detected    
     let app_blocking = mgr.state.inhibitors.active_app_inhibitors > 0;
     
     StateInfo {
@@ -47,7 +48,7 @@ pub fn collect_manager_state(mgr: &mut Manager) -> StateInfo {
 }
 
 /// Formats state info into a pretty-printed text string
-pub fn format_text_response(info: &StateInfo, prefix: Option<&str>) -> String {
+pub fn format_text_response(info: &StateInfo, sections: InfoSections) -> String {  // CHANGED SIGNATURE
     if let Some(cfg) = &info.cfg {
         let profiles = if info.available_profiles.is_empty() {
             None
@@ -55,7 +56,7 @@ pub fn format_text_response(info: &StateInfo, prefix: Option<&str>) -> String {
             Some(info.available_profiles.as_slice())
         };
         
-        let state_output = cfg.pretty_print(
+        cfg.pretty_print(
             Some(info.idle_time),
             Some(info.uptime),
             Some(info.paused),
@@ -64,16 +65,11 @@ pub fn format_text_response(info: &StateInfo, prefix: Option<&str>) -> String {
             Some(info.media_blocking),
             Some(info.media_bridge_active),
             info.profile.as_deref(),
-            profiles
-        );
-        
-        if let Some(prefix_text) = prefix {
-            format!("{}\n\n{}", prefix_text, state_output)
-        } else {
-            state_output
-        }
+            profiles,
+            sections,  // ADD THIS
+        )
     } else {
-        prefix.unwrap_or("No configuration loaded").to_string()
+        "No configuration loaded".to_string()
     }
 }
 

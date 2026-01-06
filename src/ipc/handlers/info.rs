@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use tokio::time::Duration;
 use crate::core::manager::Manager;
+use crate::config::info::InfoSections;
 use super::state_info::{collect_manager_state, format_text_response, format_json_response};
 
 /// Handles the "info" command - displays current state
 pub async fn handle_info(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     as_json: bool,
+    sections: InfoSections,
 ) -> String {
     let mut retry_count = 0;
     let max_retries = 5;
@@ -20,7 +22,7 @@ pub async fn handle_info(
                 return if as_json {
                     format_json_response(&state)
                 } else {
-                    format_text_response(&state, None)
+                    format_text_response(&state, sections)
                 };
             }
             Err(_) => {
@@ -42,3 +44,4 @@ pub async fn handle_info(
         }
     }
 }
+
