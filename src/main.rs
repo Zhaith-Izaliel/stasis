@@ -11,7 +11,6 @@ use std::{env::var, fs, process::exit};
 use clap::Parser;
 use eyre::Result;
 use tokio::net::{UnixListener, UnixStream};
-
 use crate::cli::Args;
 
 pub const SOCKET_PATH: &str = "/tmp/stasis.sock";
@@ -19,21 +18,22 @@ pub const SOCKET_PATH: &str = "/tmp/stasis.sock";
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = Args::parse();
-
+    
     if args.verbose {
         log::set_verbose(true);
     } else {
         log::set_verbose(false);
     }
     
+    // --- Handle subcommands via socket FIRST (before Wayland check) ---
+    if let Some(cmd) = &args.command {
+        return client::handle_client_command(cmd).await;
+    }
+    
+    // --- Now check for Wayland (only needed for daemon) ---
     if var("WAYLAND_DISPLAY").is_err() {
         eprintln!("Warn: Stasis requires wayland to run.");
         exit(1);
-    }
-
-    // --- Handle subcommands via socket ---
-    if let Some(cmd) = &args.command {
-        return client::handle_client_command(cmd).await;
     }
     
     // --- Single Instance enforcement ---
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     let listener = UnixListener::bind(SOCKET_PATH).map_err(|_| {
         eyre::eyre!("Failed to bind control socket. Another instance may be running.")
     })?;
-
+    
     // --- Ensure user config exists ---
     if let Err(e) = config::bootstrap::ensure_user_config_exists() {
         eprintln!("Could not initialize config: {}", e);
