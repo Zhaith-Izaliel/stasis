@@ -1,7 +1,6 @@
 use std::process;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use eyre::Result;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
@@ -11,24 +10,32 @@ use tokio::{
 use crate::{cli::Command, SOCKET_PATH};
 use crate::log::log_path;
 
-pub async fn handle_client_command(cmd: &Command) -> Result<()> {
+#[derive(Debug)]
+pub enum ClientError {
+    Io,
+}
+
+pub async fn handle_client_command(cmd: &Command) -> Result<(), ClientError> {
     match cmd {    
         Command::Info { json, section } => {
             handle_info(*json, section.clone()).await
-        },
+        }
         Command::Trigger { step } => handle_trigger(step).await,
         Command::List { args } => handle_list(args).await,
         Command::Pause { args } => handle_pause(args).await,
-        Command::Reload => handle_simple_command("reload", "Configuration reloaded successfully").await,
-        Command::Resume => handle_simple_command("resume", "Idle timers resumed").await,
-        Command::Stop => handle_simple_command("stop", "Stasis daemon stopped").await,
+        Command::Reload =>
+            handle_simple_command("reload", "Configuration reloaded successfully").await,
+        Command::Resume =>
+            handle_simple_command("resume", "Idle timers resumed").await,
+        Command::Stop =>
+            handle_simple_command("stop", "Stasis daemon stopped").await,
         Command::ToggleInhibit => handle_toggle_inhibit().await,
         Command::Dump { lines } => handle_dump(*lines).await,
         Command::Profile { name } => handle_set_profile(name).await,
     }
 }
 
-async fn handle_info(json: bool, section: Option<String>) -> Result<()> {
+async fn handle_info(json: bool, section: Option<String>) -> Result<(), ClientError> {
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             // Build the command string
@@ -78,7 +85,7 @@ async fn handle_info(json: bool, section: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn handle_trigger(step: &str) -> Result<()> {
+async fn handle_trigger(step: &str) -> Result<(), ClientError> {
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             let msg = format!("trigger {}", step);
@@ -109,7 +116,7 @@ async fn handle_trigger(step: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_list(args: &[String]) -> Result<()> {
+async fn handle_list(args: &[String]) -> Result<(), ClientError> {
     if !args.is_empty() {
         let first_arg = args[0].as_str();
         if first_arg == "help" || first_arg == "--help" || first_arg == "-h" {
@@ -156,7 +163,7 @@ async fn handle_list(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-async fn handle_pause(args: &[String]) -> Result<()> {
+async fn handle_pause(args: &[String]) -> Result<(), ClientError> {
     if !args.is_empty() {
         let first_arg = args[0].as_str();
         if first_arg == "help" || first_arg == "--help" || first_arg == "-h" {
@@ -201,7 +208,7 @@ async fn handle_pause(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-async fn handle_toggle_inhibit() -> Result<()> {
+async fn handle_toggle_inhibit() -> Result<(), ClientError> {
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             let _ = stream.write_all(b"toggle_inhibit").await;
@@ -221,7 +228,7 @@ async fn handle_toggle_inhibit() -> Result<()> {
     Ok(())
 }
 
-async fn handle_simple_command(command: &str, success_msg: &str) -> Result<()> {
+async fn handle_simple_command(command: &str, success_msg: &str) -> Result<(), ClientError> {
     match timeout(Duration::from_secs(3), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             let _ = stream.write_all(command.as_bytes()).await;
@@ -253,7 +260,7 @@ async fn handle_simple_command(command: &str, success_msg: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_dump(lines: usize) -> eyre::Result<()> {
+async fn handle_dump(lines: usize) -> Result<(), ClientError> {
     let path = log_path();
 
     let file = match File::open(&path) {
@@ -277,7 +284,7 @@ async fn handle_dump(lines: usize) -> eyre::Result<()> {
     Ok(())
 }
 
-async fn handle_set_profile(name: &str) -> Result<()> {
+async fn handle_set_profile(name: &str) -> Result<(), ClientError> {
     match timeout(Duration::from_secs(4), UnixStream::connect(SOCKET_PATH)).await {
         Ok(Ok(mut stream)) => {
             let msg = format!("profile {}", name);

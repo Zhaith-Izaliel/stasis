@@ -1,9 +1,38 @@
 use std::time::Duration;
-use eyre::Result;
+use std::fmt;
 use tokio::process::Command;
 use std::process::Stdio;
 
 use crate::{sdebug, sinfo};
+
+#[derive(Debug)]
+pub enum ProcessError {
+    EmptyCommand,
+    CommandFailed(String),
+    Timeout,
+    SpawnFailed(std::io::Error),
+    PidNotAvailable,
+}
+
+impl fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProcessError::EmptyCommand => write!(f, "Empty command"),
+            ProcessError::CommandFailed(msg) => write!(f, "Command failed: {}", msg),
+            ProcessError::Timeout => write!(f, "Command timed out"),
+            ProcessError::SpawnFailed(e) => write!(f, "Failed to spawn process: {}", e),
+            ProcessError::PidNotAvailable => write!(f, "Failed to get child PID"),
+        }
+    }
+}
+
+impl std::error::Error for ProcessError {}
+
+impl From<std::io::Error> for ProcessError {
+    fn from(err: std::io::Error) -> Self {
+        ProcessError::SpawnFailed(err)
+    }
+}
 
 /// Information about a spawned process
 #[derive(Debug, Clone)]
@@ -15,7 +44,7 @@ pub struct ProcessInfo {
 }
 
 /// Run a shell command silently (log to /tmp/stasis.log)
-pub async fn run_command_silent(cmd: &str) -> Result<()> {
+pub async fn run_command_silent(cmd: &str) -> Result<(), ProcessError> {
     let log_file = "/tmp/stasis.log";
     let fut = async {
         let mut child = Command::new("sh")
@@ -28,18 +57,23 @@ pub async fn run_command_silent(cmd: &str) -> Result<()> {
             .spawn()?;
         let status = child.wait().await?;
         if !status.success() {
-            eyre::bail!("Command '{}' exited with status {:?}", cmd, status.code());
+            return Err(ProcessError::CommandFailed(
+                format!("Command '{}' exited with status {:?}", cmd, status.code())
+            ));
         }
-        Ok::<(), eyre::Report>(())
+        Ok::<(), ProcessError>(())
     };
-    tokio::time::timeout(Duration::from_secs(30), fut).await??;
+    
+    tokio::time::timeout(Duration::from_secs(30), fut)
+        .await
+        .map_err(|_| ProcessError::Timeout)??;
     Ok(())
 }
 
 /// Run a command detached and return comprehensive process info
-pub async fn run_command_detached(command: &str) -> Result<ProcessInfo, Box<dyn std::error::Error>> {
+pub async fn run_command_detached(command: &str) -> Result<ProcessInfo, ProcessError> {
     if command.trim().is_empty() {
-        return Err("Empty command".into());
+        return Err(ProcessError::EmptyCommand);
     }
 
     // Create a new process group by using setsid
@@ -53,7 +87,7 @@ pub async fn run_command_detached(command: &str) -> Result<ProcessInfo, Box<dyn 
         .process_group(0) // Create new process group
         .spawn()?;
 
-    let pid = child.id().ok_or("Failed to get child PID")?;
+    let pid = child.id().ok_or(ProcessError::PidNotAvailable)?;
     
     // Get the process group ID (usually same as PID for process group leader)
     let pgid = get_pgid(pid).await.unwrap_or(pid);
@@ -184,7 +218,7 @@ pub async fn is_process_running(cmd: &str) -> bool {
 }
 
 /// Forcefully kill a process and its entire process group
-pub async fn kill_process_group(info: &ProcessInfo) -> Result<()> {
+pub async fn kill_process_group(info: &ProcessInfo) -> Result<(), ProcessError> {
     sinfo!("Stasis", "Killing process group {} (original PID: {})", info.pgid, info.pid);
     
     // Kill entire process group
@@ -243,4 +277,3 @@ pub async fn is_session_locked_logind() -> bool {
         }
     }
 }
-

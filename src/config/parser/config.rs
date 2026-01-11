@@ -1,19 +1,50 @@
-use eyre::{Result, WrapErr};
+use std::fmt;
+use std::io;
 use rune_cfg::RuneConfig;
 use std::path::PathBuf;
-
 use crate::{sdebug, sinfo};
 use crate::config::model::{StasisConfig, CombinedConfig};
-
+use super::actions::ActionParseError;
 use super::base::parse_base_stasis_config;
 use super::profiles::load_profiles;
 
+#[derive(Debug)]
+pub enum ConfigParseError {
+    ActionError(ActionParseError),
+    RuneConfig(String),
+    Io(io::Error),
+}
+
+impl fmt::Display for ConfigParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigParseError::ActionError(e) => write!(f, "Action parse error: {}", e),
+            ConfigParseError::RuneConfig(msg) => write!(f, "Configuration error: {}", msg),
+            ConfigParseError::Io(e) => write!(f, "IO error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ConfigParseError {}
+
+impl From<ActionParseError> for ConfigParseError {
+    fn from(err: ActionParseError) -> Self {
+        ConfigParseError::ActionError(err)
+    }
+}
+
+impl From<io::Error> for ConfigParseError {
+    fn from(err: io::Error) -> Self {
+        ConfigParseError::Io(err)
+    }
+}
+
 /// Loads the merged configuration from default, system, or user paths
-pub fn load_merged_config() -> Result<RuneConfig> {
+pub fn load_merged_config() -> Result<RuneConfig, ConfigParseError> {
     let internal_default = include_str!("../../../examples/stasis.rune");
     let mut config = RuneConfig::from_str(internal_default)
-        .wrap_err("failed to parse internal default config")?;
-
+        .map_err(|e| ConfigParseError::RuneConfig(format!("failed to parse internal default config: {}", e)))?;
+    
     let user_path = dirs::home_dir()
         .map(|mut p| {
             p.push(".config/stasis/stasis.rune");
@@ -22,43 +53,43 @@ pub fn load_merged_config() -> Result<RuneConfig> {
     
     let system_path = PathBuf::from("/etc/stasis/stasis.rune");
     let share_path = PathBuf::from("/usr/share/stasis/examples/stasis.rune");
-
+    
     if let Some(user_path) = user_path {
         if user_path.exists() {
             config = RuneConfig::from_file(&user_path)
-                .wrap_err_with(|| format!("failed to load user config from {}", user_path.display()))?;
+                .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load user config from {}: {}", user_path.display(), e)))?;
             sdebug!("Stasis", "Loaded config from: {}", user_path.display());
             return Ok(config);
         }
     }
-
+    
     if system_path.exists() {
         config = RuneConfig::from_file(&system_path)
-            .wrap_err_with(|| format!("failed to load system config from {}", system_path.display()))?;
+            .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load system config from {}: {}", system_path.display(), e)))?;
         sdebug!("Stasis", "Loaded config from: {}", system_path.display()); 
         return Ok(config);
     }
-
+    
     if share_path.exists() {
         config = RuneConfig::from_file(&share_path)
-            .wrap_err_with(|| format!("failed to load shared example config from {}", share_path.display()))?;
+            .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load shared example config from {}: {}", share_path.display(), e)))?;
         sdebug!("Stasis", "Loaded config from: {}", share_path.display());
         return Ok(config);
     }
-
+    
     sdebug!("Stasis", "Using internal default configuration");
     Ok(config)
 }
 
 /// Loads the base Stasis configuration
-pub fn load_config() -> Result<StasisConfig> {
-    let config = load_merged_config().wrap_err("failed to load configuration")?;
+pub fn load_config() -> Result<StasisConfig, ConfigParseError> {
+    let config = load_merged_config()?;
     parse_base_stasis_config(&config)
 }
 
 /// Loads the combined configuration including base and all profiles
-pub fn load_combined_config() -> Result<CombinedConfig> {
-    let config = load_merged_config().wrap_err("failed to load configuration")?;
+pub fn load_combined_config() -> Result<CombinedConfig, ConfigParseError> {
+    let config = load_merged_config()?;
     let base = parse_base_stasis_config(&config)?;
     let profiles = load_profiles(&config, &base)?;
     

@@ -1,13 +1,27 @@
-use std::{path::PathBuf};
-use eyre::Result;
+use std::{path::PathBuf, fmt};
 
 pub mod bootstrap;
 pub mod info;
 pub mod model;
 pub mod parser;
 
+#[derive(Debug)]
+pub enum ConfigError {
+    NotFound,
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigError::NotFound => write!(f, "Could not find stasis configuration file"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 /// Determine default config path
-pub async fn get_config_path() -> Result<PathBuf> {
+pub async fn get_config_path() -> Result<PathBuf, ConfigError> {
     // 1. Check user config first
     if let Some(mut path) = dirs::home_dir() {
         path.push(".config/stasis/stasis.rune");
@@ -28,5 +42,5 @@ pub async fn get_config_path() -> Result<PathBuf> {
         return Ok(share_path);
     }
     
-    Err(eyre::eyre!("Could not find stasis configuration file"))
+    Err(ConfigError::NotFound)
 }

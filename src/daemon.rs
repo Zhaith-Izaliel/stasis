@@ -1,11 +1,16 @@
 use std::sync::Arc;
-use eyre::Result;
 use tokio::{
     net::UnixListener,
     sync::Mutex,
     task::LocalSet,
     time::Duration,
 };
+
+#[derive(Debug)]
+pub enum DaemonError {
+    ConfigLoadFailed,
+    WaylandSetupFailed,
+}
 
 use crate::{
     SOCKET_PATH, config::parser::load_combined_config, core::{
@@ -27,14 +32,15 @@ use crate::{
 };
 
 /// Spawn the daemon with all its background services
-pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
+pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), DaemonError> {
     // Load config
     if verbose {
         sinfo!("Stasis", "Verbose mode enabled");
         crate::log::set_verbose(true);
     }
     
-    let combined_cfg = load_combined_config()?; 
+    let combined_cfg = load_combined_config()
+        .map_err(|_| DaemonError::ConfigLoadFailed)?;
     let cfg = Arc::new(combined_cfg.base.clone());
     let manager = Manager::new_with_profiles(&combined_cfg);
     let manager = Arc::new(Mutex::new(manager));
@@ -90,7 +96,12 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     
     // Wayland inhibitors integration loop setup
     let wayland_manager = Arc::clone(&manager);
-    let _ = setup_wayland(wayland_manager, cfg.respect_wayland_inhibitors).await?;
+    setup_wayland(
+        wayland_manager,
+        cfg.respect_wayland_inhibitors,
+    )
+    .await
+    .map_err(|_| DaemonError::WaylandSetupFailed)?;
 
     // IPC control socket
     ipc::spawn_ipc_socket_with_listener(
@@ -107,11 +118,9 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<()> {
     
     // Run main async tasks
     let local = LocalSet::new();
-    local.run_until(async {
-        std::future::pending::<()>().await;
-        #[allow(unreachable_code)]
-        Ok::<(), eyre::Report>(())
-    }).await
+    local.run_until(std::future::pending::<()>()).await;
+
+    Ok(())
 }
 
 /// Async shutdown handler (Ctrl+C / SIGTERM)

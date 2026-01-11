@@ -1,7 +1,23 @@
-use eyre::Result;
+use std::fmt;
 use rune_cfg::RuneConfig;
-
 use crate::config::model::{IdleActionBlock, IdleAction};
+
+#[derive(Debug)]
+pub enum ActionParseError {
+    MissingCommand(String),
+    MissingTimeout(String),
+}
+
+impl fmt::Display for ActionParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActionParseError::MissingCommand(action) => write!(f, "Missing command for action '{}'", action),
+            ActionParseError::MissingTimeout(action) => write!(f, "Missing timeout for action '{}'", action),
+        }
+    }
+}
+
+impl std::error::Error for ActionParseError {}
 
 /// Checks if a key is a special configuration key that shouldn't be treated as an action
 pub fn is_special_key(key: &str) -> bool {
@@ -25,19 +41,18 @@ pub fn is_special_key(key: &str) -> bool {
 }
 
 /// Collects all idle action blocks from a given configuration path
-pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBlock>> {
+pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleActionBlock>, ActionParseError> {
     let mut actions = Vec::new();
-
     let keys = config
         .get_keys(path)
         .or_else(|_| config.get_keys(&path.replace('-', "_")))
         .unwrap_or_default();
-
+    
     for key in keys {
         if is_special_key(&key) {
             continue;
         }
-
+        
         let command_path = format!("{}.{}.command", path, key);
         let command = match config
             .get::<String>(&command_path)
@@ -46,7 +61,7 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             Ok(c) => c,
             Err(_) => continue,
         };
-
+        
         let timeout_path = format!("{}.{}.timeout", path, key);
         let timeout = match config
             .get::<u64>(&timeout_path)
@@ -55,7 +70,7 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             Ok(t) => t,
             Err(_) => continue,
         };
-
+        
         let kind = match key.as_str() {
             "lock_screen" | "lock-screen" => IdleAction::LockScreen,
             "suspend" => IdleAction::Suspend,
@@ -63,12 +78,12 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             "brightness" => IdleAction::Brightness,
             _ => IdleAction::Custom,
         };
-
+        
         let resume_command = config
             .get::<String>(&format!("{}.{}.resume_command", path, key))
             .ok()
             .or_else(|| config.get::<String>(&format!("{}.{}.resume-command", path, key)).ok());
-
+        
         let lock_command = if kind == IdleAction::LockScreen {
             config
                 .get::<String>(&format!("{}.{}.lock_command", path, key))
@@ -77,16 +92,16 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
         } else {
             None
         };
-
+        
         let notification = config
             .get::<String>(&format!("{}.{}.notification", path, key))
             .ok();
-
+        
         let notify_seconds_before = config
             .get::<u64>(&format!("{}.{}.notify_seconds_before", path, key))
             .ok()
             .or_else(|| config.get::<u64>(&format!("{}.{}.notify-seconds-before", path, key)).ok());
-
+        
         actions.push(IdleActionBlock {
             name: key.clone(),
             timeout,
@@ -99,6 +114,6 @@ pub fn collect_actions(config: &RuneConfig, path: &str) -> Result<Vec<IdleAction
             notify_seconds_before,
         });
     }
-
+    
     Ok(actions)
 }

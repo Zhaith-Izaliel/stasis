@@ -1,5 +1,4 @@
-use std::{process::Command, sync::Arc, time::Duration};
-use eyre::Result;
+use std::{process::Command, sync::Arc, time::Duration, fmt};
 use futures_util::stream::StreamExt;
 use mpris::{PlayerFinder, PlaybackStatus};
 use tokio::{task, time::sleep};
@@ -8,6 +7,25 @@ use zbus::{Connection, MatchRule, MessageStream};
 use crate::{core::manager::{
     Manager, inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor}
 }, sdebug, serror, sinfo};
+
+#[derive(Debug)]
+pub enum MediaError {
+    DbusConnection(String),
+    MatchRuleBuild(String),
+    StreamCreation(String),
+}
+
+impl fmt::Display for MediaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MediaError::DbusConnection(msg) => write!(f, "Failed to connect to D-Bus: {}", msg),
+            MediaError::MatchRuleBuild(msg) => write!(f, "Failed to build match rule: {}", msg),
+            MediaError::StreamCreation(msg) => write!(f, "Failed to create message stream: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for MediaError {}
 
 // Players that are always considered local (browsers, local video players)
 // Note: Firefox is intentionally included here but handled specially
@@ -25,7 +43,7 @@ const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
     "celluloid",
 ];
 
-pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<()> {
+pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<(), MediaError> {
     sinfo!("MPRIS", "Starting media monitor");
 
     task::spawn(async move {
@@ -37,17 +55,27 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             }
         };
 
-        let rule = MatchRule::builder()
+        let rule = match MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
             .interface("org.freedesktop.DBus.Properties")
-            .unwrap()
-            .member("PropertiesChanged")
-            .unwrap()
-            .path_namespace("/org/mpris/MediaPlayer2")
-            .unwrap()
-            .build();
+            .and_then(|b| b.member("PropertiesChanged"))
+            .and_then(|b| b.path_namespace("/org/mpris/MediaPlayer2"))
+            .map(|b| b.build())
+        {
+            Ok(r) => r,
+            Err(e) => {
+                serror!("MPRIS", "Failed to build match rule: {}", e);
+                return;
+            }
+        };
 
-        let mut stream = MessageStream::for_match_rule(rule, &conn, None).await.unwrap();
+        let mut stream = match MessageStream::for_match_rule(rule, &conn, None).await {
+            Ok(s) => s,
+            Err(e) => {
+                serror!("MPRIS", "Failed to create message stream: {}", e);
+                return;
+            }
+        };
         
         // Conditional polling - only poll when something is playing
         let mut poll_interval = tokio::time::interval(tokio::time::Duration::from_secs(2));

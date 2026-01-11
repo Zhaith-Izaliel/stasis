@@ -1,6 +1,6 @@
-use eyre::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::fmt;
 
 use crate::core::manager::Manager;
 use crate::{sdebug, serror, sinfo};
@@ -19,6 +19,23 @@ use wayland_protocols::wp::idle_inhibit::zv1::client::{
     zwp_idle_inhibit_manager_v1::{ZwpIdleInhibitManagerV1, Event as InhibitMgrEvent},
     zwp_idle_inhibitor_v1::{ZwpIdleInhibitorV1, Event as InhibitorEvent},
 };
+
+#[derive(Debug)]
+pub enum WaylandError {
+    ConnectionFailed(String),
+    DispatchError(String),
+}
+
+impl fmt::Display for WaylandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WaylandError::ConnectionFailed(msg) => write!(f, "Failed to connect to Wayland: {}", msg),
+            WaylandError::DispatchError(msg) => write!(f, "Wayland dispatch error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for WaylandError {}
 
 pub struct WaylandIdleData {
     pub manager: Arc<tokio::sync::Mutex<Manager>>,
@@ -179,12 +196,12 @@ impl Dispatch<WlSeat, ()> for WaylandIdleData {
 pub async fn setup(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     respect_inhibitors: bool,
-) -> Result<Arc<tokio::sync::Mutex<WaylandIdleData>>> {
+) -> Result<Arc<tokio::sync::Mutex<WaylandIdleData>>, WaylandError> {
     sinfo!("Wayland", "Setting up idle detection (respect inhibitors={})", respect_inhibitors);
 
     // Connect to Wayland
     let conn = Connection::connect_to_env()
-        .map_err(|e| eyre::eyre!("Failed to connect to Wayland: {}", e))?;
+        .map_err(|e| WaylandError::ConnectionFailed(e.to_string()))?;
     let mut event_queue = conn.new_event_queue();
     let qh = event_queue.handle();
     let display = conn.display();
@@ -194,7 +211,8 @@ pub async fn setup(
 
     // Bind globals
     let _registry = display.get_registry(&qh, ());
-    event_queue.roundtrip(&mut app_data)?;
+    event_queue.roundtrip(&mut app_data)
+        .map_err(|e| WaylandError::DispatchError(e.to_string()))?;
 
     // Request idle notification if both notifier and seat are available
     if let (Some(notifier), Some(seat)) = (&app_data.idle_notifier, &app_data.seat) {

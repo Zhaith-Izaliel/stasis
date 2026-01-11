@@ -1,4 +1,3 @@
-use eyre::Result;
 use regex::Regex;
 use rune_cfg::{RuneConfig, Value};
 
@@ -11,9 +10,10 @@ use crate::{
 
 use super::actions::collect_actions;
 use super::pattern::parse_app_pattern;
+use super::config::ConfigParseError;
 
 /// Parses the base stasis configuration from a RuneConfig
-pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
+pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, ConfigParseError> {
     let pre_suspend_command = config
         .get::<String>("stasis.pre_suspend_command")
         .or_else(|_| config.get::<String>("stasis.pre-suspend-command"))
@@ -140,8 +140,6 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
         }
         ChassisKind::Desktop => collect_actions(config, "stasis")?,
     };
-  
-   
 
     log_config_debug(
         &pre_suspend_command,
@@ -159,9 +157,6 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig> {
         &inhibit_apps,
         &actions,
     );
-
-    let mut actions = actions;
-    actions.sort_by_key(|a| a.timeout != 0);
 
     let mut actions = actions;
     actions.sort_by_key(|a| a.timeout != 0);

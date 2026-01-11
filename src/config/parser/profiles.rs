@@ -1,4 +1,3 @@
-use eyre::Result;
 use regex::Regex;
 use rune_cfg::{RuneConfig, Value};
 
@@ -10,9 +9,10 @@ use crate::{
 
 use super::actions::{collect_actions, is_special_key};
 use super::pattern::parse_app_pattern;
+use super::config::ConfigParseError;
 
 /// Parses a single profile from the configuration
-pub fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConfig) -> Result<Profile> {
+pub fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConfig) -> Result<Profile, ConfigParseError> {
     let base_path = format!("profiles.{}", profile_name);
 
     // Actions
@@ -141,7 +141,7 @@ pub fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConf
 }
 
 /// Loads all profiles from the configuration
-pub fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Profile>> {
+pub fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Profile>, ConfigParseError> {
     let profile_keys = config
         .get_keys("profiles")
         .unwrap_or_default();
