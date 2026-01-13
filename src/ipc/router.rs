@@ -15,10 +15,43 @@ pub async fn route_command(
     cmd: &str,
     manager: Arc<tokio::sync::Mutex<Manager>>,
 ) -> String {
-    // clone cmd for logging / macro usage
     let cmd_owned = cmd.to_string();
 
-    // Top-level Router scope
+    // Special-case: info --json must NOT emit eventline output
+    if cmd_owned.starts_with("info") && cmd_owned.contains("--json") {
+        let args = cmd_owned
+            .strip_prefix("info")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        let section_arg = args
+            .split_whitespace()
+            .find(|s| !s.starts_with("--"))
+            .unwrap_or("")
+            .to_string();
+
+        let mut sections = info::InfoSections::default();
+        if !section_arg.is_empty() {
+            sections = info::InfoSections {
+                status: false,
+                config: false,
+                actions: false,
+            };
+            for part in section_arg.split(',') {
+                match part.trim() {
+                    "status" | "s" => sections.status = true,
+                    "config" | "c" => sections.config = true,
+                    "actions" | "a" => sections.actions = true,
+                    _ => {}
+                }
+            }
+        }
+
+        return infoHandler::handle_info(manager, true, sections).await;
+    }
+
+    // All other commands go through eventline
     event_scope_async!("Router", {
         let result: Result<String, String> = match cmd_owned.as_str() {
             // Config
@@ -48,12 +81,17 @@ pub async fn route_command(
             cmd if cmd.starts_with("list") => {
                 let args = cmd.strip_prefix("list").unwrap_or("").trim().to_string();
                 event_scope_async!("List", {
-                    let _args_for_macro = args.clone();
                     super::handlers::list::handle_list_command(manager.clone(), &args)
                         .await
                         .map_err(|e| {
                             let e_for_log = e.clone();
-                            tokio::spawn(event_error_scoped!("List", "List command failed: {}", e_for_log));
+                            tokio::spawn(
+                                event_error_scoped!(
+                                    "List",
+                                    "List command failed: {}",
+                                    e_for_log
+                                )
+                            );
                             e
                         })
                 })
@@ -92,12 +130,10 @@ pub async fn route_command(
                 .await
             }
 
-            // Info
+            // Info (non-JSON only)
             cmd if cmd.starts_with("info") => {
                 let args = cmd.strip_prefix("info").unwrap_or("").trim().to_string();
-                let as_json = args.contains("--json");
 
-                // Parse section argument
                 let section_arg = args
                     .split_whitespace()
                     .find(|s| !s.starts_with("--"))
@@ -106,7 +142,11 @@ pub async fn route_command(
 
                 let mut sections = info::InfoSections::default();
                 if !section_arg.is_empty() {
-                    sections = info::InfoSections { status: false, config: false, actions: false };
+                    sections = info::InfoSections {
+                        status: false,
+                        config: false,
+                        actions: false,
+                    };
                     for part in section_arg.split(',') {
                         match part.trim() {
                             "status" | "s" => sections.status = true,
@@ -117,12 +157,8 @@ pub async fn route_command(
                     }
                 }
 
-                // Clone/move into locals for the macro
-                let sections_for_macro = sections;
-                let as_json_for_macro = as_json;
-
                 event_scope_async!("Info", {
-                    Ok(infoHandler::handle_info(manager.clone(), as_json_for_macro, sections_for_macro).await)
+                    Ok(infoHandler::handle_info(manager.clone(), false, sections).await)
                 })
                 .await
             }
@@ -130,7 +166,12 @@ pub async fn route_command(
             // Unknown
             _ => {
                 let cmd_for_log = cmd_owned.clone();
-                event_warn_scoped!("Router", "Unknown IPC command: {}", cmd_for_log).await;
+                event_warn_scoped!(
+                    "Router",
+                    "Unknown IPC command: {}",
+                    cmd_for_log
+                )
+                .await;
                 Err(format!("ERROR: Unknown command '{}'", cmd_owned))
             }
         };
@@ -139,4 +180,3 @@ pub async fn route_command(
     })
     .await
 }
-

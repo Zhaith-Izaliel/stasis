@@ -46,14 +46,23 @@ async fn real_main() -> Result<(), AppError> {
     let command_opt = args.command.clone();
 
     // --- Initialize Eventline runtime ---
-    runtime::init().await;
-    runtime::enable_console_output(true);
-    runtime::enable_console_color(true);
-    if verbose {
-        set_log_level(LogLevel::Debug);
-    } else {
-        set_log_level(LogLevel::Info);
+    let is_client = command_opt.is_some();
+
+    if !is_client {
+        runtime::init().await;
+        runtime::enable_console_output(true);
+        runtime::enable_console_color(true);
+        if verbose {
+            set_log_level(LogLevel::Debug);
+        } else {
+            set_log_level(LogLevel::Info);
+        }
+
+        init_logging(verbose).await;
+        let log_path = utils::get_log_path();
+        crate::utils::mark_new_run(&log_path, "Stasis start");
     }
+
 
     // --- Initialize logging and mark new run ---
     init_logging(verbose).await;
@@ -62,8 +71,8 @@ async fn real_main() -> Result<(), AppError> {
   
     // --- Handle client commands ---
     if let Some(cmd) = command_opt {
-        let cmd_clone = cmd.clone(); // clone for logging
-        event_debug_scoped!("Client", "Handling client command: {:?}", cmd_clone).await;
+        //let cmd_clone = cmd.clone(); // clone for logging
+        //event_debug_scoped!("Client", "Handling client command: {:?}", cmd_clone).await;
 
         client::handle_client_command(&cmd).await.map_err(|_| {
             futures::executor::block_on(event_error_scoped!("Client", "Client command failed"));
