@@ -2,6 +2,7 @@ use std::sync::Arc;
 use crate::{
     core::manager::Manager,
     config::info,
+    daemon::ShutdownSender,
 };
 use super::handlers::{
     config, control, info as infoHandler, pause_resume, profile, trigger,
@@ -14,6 +15,7 @@ use eventline::{
 pub async fn route_command(
     cmd: &str,
     manager: Arc<tokio::sync::Mutex<Manager>>,
+    shutdown_tx: ShutdownSender,
 ) -> String {
     let cmd_owned = cmd.to_string();
 
@@ -119,7 +121,7 @@ pub async fn route_command(
             // Control
             "stop" => {
                 event_scope_async!("Control", {
-                    Ok(control::handle_stop(manager.clone()).await)
+                    Ok(control::handle_stop(manager.clone(), shutdown_tx.clone()).await)
                 })
                 .await
             }

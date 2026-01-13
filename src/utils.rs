@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use once_cell::sync::Lazy;
 use eventline::runtime::log_level::{LogLevel, set_log_level};
 use eventline::runtime;
-use eventline::{event_info, event_debug};
+use eventline::event_info;
 
 static NEW_RUN_MARKED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
@@ -82,5 +82,5 @@ pub async fn save_journal() {
         return;
     }
 
-    event_debug!("Journal saved (live log writes immediately)").await;
+   //event_debug!("Journal saved (live log writes immediately)").await;
 }

@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use tokio::{
     net::UnixListener,
-    sync::Mutex,
-    task::LocalSet,
+    sync::{Mutex, mpsc},
     time::Duration,
 };
 
@@ -27,8 +26,11 @@ use crate::{
     }, 
     ipc
 };
-use eventline::{event_info_scoped, event_error_scoped};
+use eventline::{event_error_scoped, event_info_scoped};
 use eventline::runtime::log_level::{set_log_level, LogLevel};
+
+// Global shutdown channel sender - IPC handlers can use this
+pub type ShutdownSender = mpsc::Sender<&'static str>;
 
 /// Spawn the daemon with all its background services
 pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), DaemonError> {
@@ -46,6 +48,9 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     let cfg = Arc::new(combined_cfg.base.clone());
     let manager = Manager::new_with_profiles(&combined_cfg);
     let manager = Arc::new(Mutex::new(manager));
+
+    // Create shutdown channel
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<&'static str>(1);
 
     // Spawn internal background tasks
     {
@@ -104,61 +109,65 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     .await
     .map_err(|_| DaemonError::WaylandSetupFailed)?;
 
-    // IPC control socket
+    // IPC control socket - pass shutdown sender so IPC stop command can trigger shutdown
     ipc::spawn_ipc_socket_with_listener(
         Arc::clone(&manager),
         listener,
+        shutdown_tx.clone(),
     ).await;
 
     // Shutdown watcher loops
-    setup_shutdown_handler(Arc::clone(&manager)).await;
-    spawn_wayland_monitor(Arc::clone(&manager)).await;
+    setup_shutdown_handler(shutdown_tx.clone()).await;
+    spawn_wayland_monitor(shutdown_tx.clone()).await;
 
     // Log startup message
-    tokio::spawn(event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len()));
+    event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len()).await;
 
-    // Run main async tasks
-    let local = LocalSet::new();
-    local.run_until(std::future::pending::<()>()).await;
-
+    // Wait for shutdown signal
+    let shutdown_reason = shutdown_rx.recv().await.unwrap_or("unknown");
+    
+    event_info_scoped!("Stasis", "Shutdown initiated: {}", shutdown_reason).await;
+    
+    // Perform cleanup
+    manager.lock().await.shutdown().await;
+    
+    // Give shutdown events time to be logged
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    
+    // Clean up socket
+    let _ = std::fs::remove_file(SOCKET_PATH);
+    
+    event_info_scoped!("Stasis", "Shutdown complete, goodbye!").await;
+    
+    // Give final log time to complete
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    
     Ok(())
 }
 
 /// Async shutdown handler (Ctrl+C / SIGTERM)
 async fn setup_shutdown_handler(
-    manager: Arc<Mutex<Manager>>,
+    shutdown_tx: mpsc::Sender<&'static str>,
 ) {
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).unwrap();
 
-    tokio::spawn({
-        let manager = Arc::clone(&manager);
-        async move {
-            tokio::select! {
-                _ = sigint.recv() => {
-                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGINT, shutting down..."));
-                },
-                _ = sigterm.recv() => {
-                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGTERM, shutting down..."));
-                },
-                _ = sighup.recv() => {
-                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGHUP, shutting down..."));
-                },
-            }
+    tokio::spawn(async move {
+        let signal_name = tokio::select! {
+            _ = sigint.recv() => "SIGINT",
+            _ = sigterm.recv() => "SIGTERM",
+            _ = sighup.recv() => "SIGHUP",
+        };
 
-            manager.lock().await.shutdown().await;
-
-            let _ = std::fs::remove_file(SOCKET_PATH);
-            tokio::spawn(event_info_scoped!("Stasis", "Shutdown complete, goodbye!"));
-            std::process::exit(0);
-        }
+        event_info_scoped!("Stasis", "Received {}", signal_name).await;
+        let _ = shutdown_tx.send(signal_name).await;
     });
 }
 
 // Watches for wayland socket being dead and stops Stasis
 async fn spawn_wayland_monitor(
-    manager: Arc<Mutex<Manager>>,
+    shutdown_tx: mpsc::Sender<&'static str>,
 ) {
     use tokio::net::UnixStream;
 
@@ -176,13 +185,9 @@ async fn spawn_wayland_monitor(
 
             // Try connecting to the Wayland socket
             if UnixStream::connect(&socket_path).await.is_err() {
-                tokio::spawn(event_info_scoped!("Stasis", "Wayland compositor is no longer responding, shutting down..."));
-
-                manager.lock().await.shutdown().await;
-
-                let _ = std::fs::remove_file(SOCKET_PATH);
-                tokio::spawn(event_info_scoped!("Stasis", "Shutdown complete, goodbye!"));
-                std::process::exit(0);
+                event_info_scoped!("Stasis", "Wayland compositor is no longer responding").await;
+                let _ = shutdown_tx.send("Wayland disconnect").await;
+                break;
             }
         }
     });
