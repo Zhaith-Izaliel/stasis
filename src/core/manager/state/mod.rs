@@ -25,8 +25,10 @@ use crate::{
         power::PowerState, 
         profile::ProfileState,
         timing::TimingState
-    }, sdebug,
+    }
 };
+use eventline::{event_debug_scoped};
+
 
 #[derive(Debug)]
 pub struct ManagerState {
@@ -168,13 +170,15 @@ impl ManagerState {
         self.lock = LockState::from_config(cfg);
         self.timing.last_activity = Instant::now();
 
-        sdebug!("Stasis", "Idle timers reloaded from config (active block: {})", self.power.current_block);
+        let current_block = self.power.current_block.clone();
+        event_debug_scoped!("Stasis", "Idle timers reloaded from config (active block: {})", current_block).await;
     }
 
     /// NEW: Reload profiles from combined config
     pub async fn reload_profiles(&mut self, combined: &CombinedConfig) {
         self.profile.update_profiles(combined.profiles.clone());
-        sdebug!("Stasis", "Reloaded {} profile(s)", combined.profiles.len());
+        let profile_count = combined.profiles.len();
+        event_debug_scoped!("Stasis", "Reloaded {} profile(s)", profile_count).await;
     }
 
     pub fn wake_idle_tasks(&self) {

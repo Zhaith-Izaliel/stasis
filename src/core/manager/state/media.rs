@@ -1,5 +1,5 @@
 use crate::core::manager::{inhibitors::{decr_active_inhibitor, incr_active_inhibitor, InhibitorSource}, Manager};
-use crate::sdebug;
+use eventline::event_debug_scoped;
 
 /// Manages media playback state from multiple sources
 #[derive(Debug, Default, Clone)]
@@ -59,18 +59,18 @@ impl MediaState {
     /// CRITICAL: Browser tabs use per-tab inhibitor counting!
     /// Must decrement once for MPRIS + once PER BROWSER TAB
     pub async fn reset_for_profile_change(&mut self, mgr: &mut Manager) {
-        sdebug!("Stasis", "Resetting media state for profile change");
+        event_debug_scoped!("Stasis", "Resetting media state for profile change").await;
         
         // MPRIS: decrement once if active
         if self.mpris_media_playing {
-            sdebug!("Stasis", "Clearing MPRIS media inhibitor");
+            event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor").await;
             decr_active_inhibitor(mgr, InhibitorSource::Media).await;
         }
         
         // Browser: decrement once PER TAB (each tab increments separately!)
         let tab_count = self.browser_playing_tab_count;
         if tab_count > 0 {
-            sdebug!("Stasis", "Clearing {} browser tab inhibitors", tab_count);
+            event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count).await;
             for _ in 0..tab_count {
                 decr_active_inhibitor(mgr, InhibitorSource::Media).await;
             }
@@ -84,17 +84,23 @@ impl MediaState {
         self.browser_playing_tab_count = 0;
         // Don't reset media_bridge_active - it's independent of profile
         
-        sdebug!("Stasis", "Media state reset complete");
+        event_debug_scoped!("Stasis", "Media state reset complete").await;
     }
     
     pub fn log_state(&self) { 
-        sdebug!(
+        // Copy or clone all fields we need
+        let bridge_active = self.media_bridge_active;
+        let browser_playing = self.browser_media_playing;
+        let tabs = self.browser_playing_tab_count;
+        let mpris_playing = self.media_playing;
+
+        tokio::spawn(event_debug_scoped!(
             "Media",
             "Media State: bridge_active={}, browser_playing={} (tabs={}), mpris_playing={}",
-            self.media_bridge_active,
-            self.browser_media_playing,
-            self.browser_playing_tab_count,
-            self.media_playing,
-        );
+            bridge_active,
+            browser_playing,
+            tabs,
+            mpris_playing,
+        ));
     }
 }

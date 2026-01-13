@@ -1,15 +1,19 @@
 use std::{
-    fs::OpenOptions, os::unix::{
+    fs::OpenOptions,
+    os::unix::{
         fs::OpenOptionsExt,
         io::{AsRawFd, OwnedFd},
-    }, path::Path, sync::Arc, time::{Duration, Instant}
+    },
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use input::LibinputInterface;
 use tokio::sync::Mutex;
 use futures::FutureExt;
 use crate::core::manager::Manager;
-use crate::{sinfo};
+use eventline::event_info_scoped;
 
 struct InputDetection;
 
@@ -46,7 +50,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 tokio::select! {
                     maybe_event = rx.recv() => {
                         if maybe_event.is_none() {
-                            sinfo!("Libinput", "Input async handler channel closed");
+                            event_info_scoped!("Libinput", "Input async handler channel closed").await;
                             break;
                         }
 
@@ -60,7 +64,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 }
             }
 
-            sinfo!("Libinput", "event loop shutting down...");
+            event_info_scoped!("Libinput", "event loop shutting down...").await;
         });
 
         // Blocking thread: libinput event polling
@@ -106,21 +110,15 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 while let Some(event) = libinput.next() {
                     // Only count these as real input activity
                     match event {
-                        input::Event::Keyboard(_) | 
-                        input::Event::Pointer(_) | 
-                        input::Event::Touch(_) | 
-                        input::Event::Tablet(_) | 
-                        input::Event::Gesture(_) | 
+                        input::Event::Keyboard(_) |
+                        input::Event::Pointer(_) |
+                        input::Event::Touch(_) |
+                        input::Event::Tablet(_) |
+                        input::Event::Gesture(_) |
                         input::Event::Switch(_) => {
                             has_real_input = true;
                         }
-                        // Ignore device add/remove and other non-input events
-                        input::Event::Device(_) => {
-                            // Device add/remove - not real input
-                        }
-                        _ => {
-                            // Other events - not real input
-                        }
+                        _ => {} // Ignore non-input events
                     }
                 }
 

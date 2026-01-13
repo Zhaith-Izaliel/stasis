@@ -1,6 +1,8 @@
 use std::process;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use dirs::home_dir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
@@ -8,7 +10,6 @@ use tokio::{
 };
 
 use crate::{cli::Command, SOCKET_PATH};
-use crate::log::log_path;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -261,7 +262,17 @@ async fn handle_simple_command(command: &str, success_msg: &str) -> Result<(), C
 }
 
 async fn handle_dump(lines: usize) -> Result<(), ClientError> {
-    let path = log_path();
+    // Build path: $HOME/.cache/stasis/stasis.log
+    let path: PathBuf = match home_dir() {
+        Some(mut dir) => {
+            dir.push(".cache/stasis/eventline.log");
+            dir
+        }
+        None => {
+            eprintln!("Could not determine home directory for log path");
+            return Ok(());
+        }
+    };
 
     let file = match File::open(&path) {
         Ok(f) => f,
@@ -272,7 +283,8 @@ async fn handle_dump(lines: usize) -> Result<(), ClientError> {
     };
 
     let reader = BufReader::new(file);
-    let all_lines: Vec<String> = reader.lines()
+    let all_lines: Vec<String> = reader
+        .lines()
         .filter_map(Result::ok)
         .collect();
 

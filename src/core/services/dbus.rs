@@ -6,7 +6,7 @@ use zvariant::Value;
 
 use crate::core::events::handlers::{handle_event, Event};
 use crate::core::manager::Manager;
-use crate::{sinfo, sdebug, swarn, serror};
+use eventline::{event_info_scoped, event_debug_scoped, event_warn_scoped, event_error_scoped};
 
 pub async fn listen_for_suspend_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusResult<()> {
     let connection = Connection::system().await?;
@@ -18,23 +18,23 @@ pub async fn listen_for_suspend_events(idle_manager: Arc<Mutex<Manager>>) -> Zbu
     ).await?;
     
     let mut stream = proxy.receive_signal("PrepareForSleep").await?;
-    sinfo!("D-Bus", "Listening for system suspend events");
+    event_info_scoped!("D-Bus", "Listening for system suspend events").await;
 
     while let Some(signal) = stream.next().await {
         let going_to_sleep: bool = match signal.body().deserialize() {
             Ok(val) => val,
             Err(e) => {
-                swarn!("D-Bus", "Failed to parse suspend signal: {e:?}");
+                event_warn_scoped!("D-Bus", "Failed to parse suspend signal: {e:?}").await;
                 continue;
             }
         };
 
         let mgr = Arc::clone(&idle_manager);
         if going_to_sleep {
-            sinfo!("Power", "System preparing to suspend");
+            event_info_scoped!("Power", "System preparing to suspend").await;
             handle_event(&mgr, Event::Suspend).await;
         } else {
-            sinfo!("Power", "System woke from suspend");
+            event_info_scoped!("Power", "System woke from suspend").await;
             handle_event(&mgr, Event::Wake).await;
         }
     }
@@ -44,7 +44,7 @@ pub async fn listen_for_suspend_events(idle_manager: Arc<Mutex<Manager>>) -> Zbu
 
 pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusResult<()> {
     let connection = Connection::system().await?;
-    sinfo!("D-Bus", "Listening for lid open/close events via UPower");
+    event_info_scoped!("D-Bus", "Listening for lid open/close events via UPower").await;
 
     let rule = MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
@@ -59,7 +59,7 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
-                serror!("D-Bus", "Error receiving lid message: {e:?}");
+                event_error_scoped!("D-Bus", "Error receiving lid message: {e:?}").await;
                 continue;
             }
         };
@@ -68,26 +68,22 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
         let (iface, changed, _): (String, HashMap<String, Value>, Vec<String>) = match body.deserialize() {
             Ok(val) => val,
             Err(e) => {
-                swarn!("D-Bus", "Failed to parse lid event: {e:?}");
+                event_warn_scoped!("D-Bus", "Failed to parse lid event: {e:?}").await;
                 continue;
             }
         };
 
         if iface == "org.freedesktop.UPower" {
             if let Some(val) = changed.get("LidIsClosed") {
-                match val.downcast_ref::<bool>() {
-                    Ok(lid_closed) => {
-                        let mgr = Arc::clone(&idle_manager);
-                        if lid_closed {
-                            sinfo!("Power", "Lid closed");
-                            handle_event(&mgr, Event::LidClosed).await;
-                        } else {
-                            sinfo!("Power", "Lid opened");
-                            handle_event(&mgr, Event::LidOpened).await;
-                        }
-                    }
-                    Err(e) => {
-                        serror!("D-Bus", "Failed to downcast LidIsClosed value: {e:?}");
+                // downcast returns Result<bool, Error>
+                if let Ok(lid_closed) = val.clone().downcast::<bool>() {
+                    let mgr = Arc::clone(&idle_manager);
+                    if lid_closed {
+                        event_info_scoped!("Power", "Lid closed").await;
+                        handle_event(&mgr, Event::LidClosed).await;
+                    } else {
+                        event_info_scoped!("Power", "Lid opened").await;
+                        handle_event(&mgr, Event::LidOpened).await;
                     }
                 }
             }
@@ -99,10 +95,11 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
 
 pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusResult<()> {
     let connection = Connection::system().await?;
-    sinfo!("D-Bus", "Listening for loginctl Lock/Unlock events");
+    event_info_scoped!("D-Bus", "Listening for loginctl Lock/Unlock events").await;
 
     let session_path = get_current_session_path(&connection).await?;
-    sinfo!("D-Bus", "Monitoring session {}", session_path.as_str());
+    let session_path_clone = session_path.clone();
+    event_info_scoped!("D-Bus", "Monitoring session {}", session_path_clone.as_str()).await;
 
     let proxy = Proxy::new(
         &connection,
@@ -119,14 +116,14 @@ pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRe
 
     let lock_task = tokio::spawn(async move {
         while let Some(_sig) = lock_stream.next().await {
-            sinfo!("Session", "Received loginctl Lock");
+            event_info_scoped!("Session", "Received loginctl Lock").await;
             handle_event(&lock_mgr, Event::LoginctlLock).await;
         }
     });
 
     let unlock_task = tokio::spawn(async move {
         while let Some(_sig) = unlock_stream.next().await {
-            sinfo!("Session", "Received loginctl Unlock");
+            event_info_scoped!("Session", "Received loginctl Unlock").await;
             handle_event(&unlock_mgr, Event::LoginctlUnlock).await;
         }
     });
@@ -144,36 +141,41 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
     ).await?;
 
     if let Ok(session_id) = std::env::var("XDG_SESSION_ID") {
-        sdebug!("D-Bus", "Trying XDG_SESSION_ID: {}", session_id);
+        let session_id_clone = session_id.clone();
+        event_debug_scoped!("D-Bus", "Trying XDG_SESSION_ID: {}", session_id_clone).await;
         let result: Result<zvariant::OwnedObjectPath, zbus::Error> =
             proxy.call("GetSession", &(session_id.as_str(),)).await;
 
-        match result {
-            Ok(path) => {
-                sinfo!("Session", "Using session {} from XDG_SESSION_ID", path.as_str());
-                return Ok(path);
-            }
-            Err(e) => {
-                swarn!("Session", "XDG_SESSION_ID lookup failed: {e}");
-            }
+        if let Ok(path) = result {
+            let path_clone = path.clone();
+            event_info_scoped!("Session", "Using session {} from XDG_SESSION_ID", path_clone.as_str()).await;
+            return Ok(path);
+        } else if let Err(e) = result {
+            event_warn_scoped!("Session", "XDG_SESSION_ID lookup failed: {e}").await;
         }
     }
 
     let uid = unsafe { libc::getuid() };
-    sdebug!("Session", "Searching for sessions for UID {}", uid);
+    event_debug_scoped!("Session", "Searching for sessions for UID {}", uid).await;
 
     let sessions: Vec<(String, u32, String, String, zvariant::OwnedObjectPath)> =
         proxy.call("ListSessions", &()).await?;
 
-    for (session_id, session_uid, username, seat, path) in &sessions {
-        if *session_uid == uid {
-            sdebug!(
+    // clone per-loop for static lifetime
+    for (session_id, session_uid, username, seat, path) in sessions.clone() {
+        if session_uid == uid {
+            let session_id_c = session_id.clone();
+            let username_c = username.clone();
+            let seat_c = seat.clone();
+            let _path_c = path.clone();
+
+            event_debug_scoped!(
                 "Session",
                 "Found session '{}' (user: {}, seat: {})",
-                session_id,
-                username,
-                seat
-            );
+                session_id_c,
+                username_c,
+                seat_c
+            ).await;
 
             if let Ok(sproxy) = Proxy::new(
                 connection,
@@ -182,43 +184,58 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
                 "org.freedesktop.login1.Session"
             ).await {
                 if let Ok(session_type) = sproxy.get_property::<String>("Type").await {
-                    sdebug!("Session", "Session '{}' type: {}", session_id, session_type);
+                    let stype = session_type.clone();
+                    let session_id_c2 = session_id.clone();
+
+                    // clone specifically for debug macro
+                    let stype_dbg = stype.clone();
+                    event_debug_scoped!(
+                        "Session",
+                        "Session '{}' type: {}",
+                        session_id_c2,
+                        stype_dbg
+                    ).await;
 
                     if (session_type == "wayland" || session_type == "x11") && seat == "seat0" {
-                        sinfo!(
+                        let session_id_c3 = session_id.clone();
+                        let stype_c3 = stype.clone();
+                        event_info_scoped!(
                             "Session",
                             "Selected active graphical session '{}' (type: {})",
-                            session_id,
-                            session_type
-                        );
-                        return Ok(path.clone());
+                            session_id_c3,
+                            stype_c3
+                        ).await;
+                        return Ok(path);
                     }
                 }
             }
         }
     }
 
-    for (session_id, session_uid, _username, _seat, path) in sessions {
+    // fallback: first session for UID
+    for (_session_id, session_uid, _username, _seat, path) in sessions {
         if session_uid == uid {
-            sinfo!("Session", "Using first session '{}' for UID {}", session_id, uid);
+            event_info_scoped!("Session", "Using first session for UID {}", uid).await;
             return Ok(path);
         }
     }
 
-    swarn!("Session", "No session found for UID {}, falling back to PID method", uid);
-
+    // fallback PID
+    event_warn_scoped!("Session", "No session found for UID {}, falling back to PID method", uid).await;
     let pid = std::process::id();
     let result: Result<zvariant::OwnedObjectPath, zbus::Error> =
         proxy.call("GetSessionByPID", &(pid,)).await;
 
-    match result {
-        Ok(path) => {
-            sinfo!("Session", "Using session {} from PID {}", path.as_str(), pid);
-            Ok(path)
-        }
-        Err(e) => Err(zbus::fdo::Error::Failed(format!(
+    if let Ok(path) = result {
+        let path_clone = path.clone();
+        event_info_scoped!("Session", "Using session {} from PID {}", path_clone.as_str(), pid).await;
+        Ok(path)
+    } else if let Err(e) = result {
+        Err(zbus::fdo::Error::Failed(format!(
             "Could not resolve session by XDG_SESSION_ID, UID, or PID: {e}"
-        ))),
+        )))
+    } else {
+        unreachable!()
     }
 }
 
@@ -230,19 +247,19 @@ pub async fn listen_for_power_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusR
 
     let suspend_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_suspend_events(m1).await {
-            serror!("Power", "Suspend listener error: {e:?}");
+            event_error_scoped!("Power", "Suspend listener error: {e:?}").await;
         }
     });
 
     let lid_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_lid_events(m2).await {
-            serror!("Power", "Lid listener error: {e:?}");
+            event_error_scoped!("Power", "Lid listener error: {e:?}").await;
         }
     });
 
     let lock_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_lock_events(m3).await {
-            serror!("Power", "Lock listener error: {e:?}");
+            event_error_scoped!("Power", "Lock listener error: {e:?}").await;
         }
     });
 

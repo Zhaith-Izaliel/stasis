@@ -7,7 +7,7 @@ use procfs::process::all_processes;
 
 use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor};
 use crate::core::manager::Manager;
-use crate::{sdebug, sinfo};
+use eventline::{event_info_scoped, event_debug_scoped};
 
 /// Tracks currently running apps to inhibit idle
 #[derive(Debug)]
@@ -19,16 +19,18 @@ pub struct AppInhibitor {
 }
 
 impl AppInhibitor {
-    pub fn new(manager: Arc<Mutex<Manager>>) -> Self {
+    pub fn new(manager: Arc<Mutex<Manager>>) -> Self {      
         let desktop = std::env::var("XDG_CURRENT_DESKTOP")
             .unwrap_or_default()
             .to_lowercase();
 
-        sdebug!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop);
+        // log without moving the variable
+        let desktop_for_log = desktop.clone();
+        tokio::spawn(event_debug_scoped!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop_for_log));
 
         Self {
             active_apps: HashSet::new(),
-            desktop,
+            desktop, // move original here safely
             manager,
             inhibitor_active: false,
         }
@@ -78,10 +80,10 @@ impl AppInhibitor {
             },
         };
 
-        // Log newly detected apps
-        for app in &new_active_apps {
-            if !self.active_apps.contains(app) {
-                sinfo!("Stasis", "App inhibit active: {}", app);
+        // Log newly detected apps (iterate over owned clone to avoid borrowing issues)
+        for app in new_active_apps.clone() {
+            if !self.active_apps.contains(&app) {
+                event_info_scoped!("Stasis", "App inhibit active: {}", app).await;
             }
         }
 
@@ -241,7 +243,7 @@ pub async fn spawn_app_inhibit_task(
     let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
 
     if !has_apps {
-        sinfo!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
+        event_info_scoped!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.").await;
         let inhibitor_clone = Arc::clone(&inhibitor);
         let handle = tokio::spawn(async move {
             let inhibitor_guard = inhibitor_clone.lock().await;
@@ -249,7 +251,7 @@ pub async fn spawn_app_inhibit_task(
             let shutdown = manager_guard.state.shutdown_flag.clone();
 
             shutdown.notified().await;
-            sinfo!("Stasis", "App inhibitor shutting down...");
+            event_info_scoped!("Stasis", "App inhibitor shutting down...").await;
         });
         return (inhibitor, handle);
     }
@@ -268,7 +270,7 @@ pub async fn spawn_app_inhibit_task(
 
             tokio::select! {
                 _ = shutdown.notified() => {
-                    sinfo!("Stasis", "App inhibitor shutting down...");
+                    event_info_scoped!("Stasis", "App inhibitor shutting down...").await;
                     break;
                 }
                 

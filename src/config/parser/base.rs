@@ -4,13 +4,13 @@ use rune_cfg::{RuneConfig, Value};
 use crate::{
     config::model::*,
     core::utils::{ChassisKind, detect_chassis},
-    sdebug,
-    sinfo,
 };
 
 use super::actions::collect_actions;
 use super::pattern::parse_app_pattern;
 use super::config::ConfigParseError;
+
+use eventline::{event_info_scoped, event_debug_scoped};
 
 /// Parses the base stasis configuration from a RuneConfig
 pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, ConfigParseError> {
@@ -30,11 +30,9 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
         .unwrap_or(true);
 
     let media_blacklist: Vec<String> = config
-        .get("stasis.media_blacklist")
+        .get::<Vec<String>>("stasis.media_blacklist")
         .or_else(|_| config.get("stasis.media-blacklist"))
-        .unwrap_or_default();
-    
-    let media_blacklist: Vec<String> = media_blacklist
+        .unwrap_or_default()
         .into_iter()
         .map(|s| s.to_lowercase())
         .collect();
@@ -119,7 +117,7 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
     let actions = match chassis {
         ChassisKind::Laptop => {
             let mut all = Vec::new();
-            
+
             let ac_actions = collect_actions(config, "stasis.on_ac")?
                 .into_iter()
                 .map(|mut a| {
@@ -127,7 +125,7 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
                     a
                 });
             all.extend(ac_actions);
-            
+
             let battery_actions = collect_actions(config, "stasis.on_battery")?
                 .into_iter()
                 .map(|mut a| {
@@ -135,7 +133,7 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
                     a
                 });
             all.extend(battery_actions);
-            
+
             all
         }
         ChassisKind::Desktop => collect_actions(config, "stasis")?,
@@ -161,12 +159,14 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
     let mut actions = actions;
     actions.sort_by_key(|a| a.timeout != 0);
 
-    // Non-debug message
+    // Non-debug info via eventline
     if !actions.is_empty() {
         let action_names: Vec<String> = actions.iter().map(|a| a.name.clone()).collect();
-        sinfo!("Stasis", "Config loaded with actions: [{}]", action_names.join(", "));
+        // Clone string for 'static safety
+        let action_names_str = action_names.join(", ");
+        tokio::spawn(event_info_scoped!("Stasis", "Config loaded with actions: [{}]", action_names_str));
     } else {
-        sinfo!("Stasis", "Config loaded with no actions.");
+        tokio::spawn(event_info_scoped!("Stasis", "Config loaded with no actions."));
     }
 
     Ok(StasisConfig {
@@ -203,47 +203,52 @@ fn log_config_debug(
     inhibit_apps: &[AppInhibitPattern],
     actions: &[IdleActionBlock],
 ) {
-    sdebug!("Config", "Parsed Config:");
-    sdebug!("Config", "  pre_suspend_command = {:?}", pre_suspend_command);
-    sdebug!("Config", "  monitor_media = {:?}", monitor_media);
-    sdebug!("Config", "  ignore_remote_media = {:?}", ignore_remote_media);
-    sdebug!(
-        "Config",
-        "  media_blacklist = [{}]",
-        media_blacklist.join(", ")
-    );
-    sdebug!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors);
-    sdebug!("Config", "  notify_on_unpause = {:?}", notify_on_unpause);
-    sdebug!("Config", "  notify_before_action = {:?}", notify_before_action);
-    sdebug!("Config", "  notify_seconds_before = {:?}", notify_seconds_before);
-    sdebug!("Config", "  debounce_seconds = {:?}", debounce_seconds);
-    sdebug!("Config", "  lid_close_action = {:?}", lid_close_action);
-    sdebug!("Config", "  lid_open_action = {:?}", lid_open_action);
-    sdebug!("Config", "  lock_detection_type = {:?}", lock_detection_type);
-    sdebug!(
-        "Config",
-        "  inhibit_apps = [{}]",
-        inhibit_apps.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
-    );
-    sdebug!("Stasis", "  actions:");
-    for action in actions {
-        let mut details = format!(
-            "    {}: timeout={}s, command=\"{}\"",
-            action.name, action.timeout, action.command
-        );
+    // Clone everything for static lifetime
+    let pre_suspend_command = pre_suspend_command.clone().unwrap_or_default();
+    let media_blacklist = media_blacklist.to_vec();
+    let lid_close_action = lid_close_action.clone();
+    let lid_open_action = lid_open_action.clone();
+    let lock_detection_type = lock_detection_type.clone();
+    let inhibit_apps: Vec<AppInhibitPattern> = inhibit_apps.to_vec();
+    let actions: Vec<IdleActionBlock> = actions.to_vec();
 
-        if let Some(lock_cmd) = &action.lock_command {
-            details.push_str(&format!(", lock_command=\"{}\"", lock_cmd));
-        } 
-        if let Some(resume_cmd) = &action.resume_command {
-            details.push_str(&format!(", resume_command=\"{}\"", resume_cmd));
-        }
-        if let Some(notification) = &action.notification {
-            details.push_str(&format!(", notification=\"{}\"", notification));
-            if let Some(notify_sec) = action.notify_seconds_before {
-                details.push_str(&format!(", notify_seconds_before={}s", notify_sec));
+    tokio::spawn(async move {
+        event_debug_scoped!("Config", "Parsed Config:").await;
+        event_debug_scoped!("Config", "  pre_suspend_command = {:?}", pre_suspend_command).await;
+        event_debug_scoped!("Config", "  monitor_media = {:?}", monitor_media).await;
+        event_debug_scoped!("Config", "  ignore_remote_media = {:?}", ignore_remote_media).await;
+        event_debug_scoped!("Config", "  media_blacklist = {:?}", media_blacklist).await;
+        event_debug_scoped!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors).await;
+        event_debug_scoped!("Config", "  notify_on_unpause = {:?}", notify_on_unpause).await;
+        event_debug_scoped!("Config", "  notify_before_action = {:?}", notify_before_action).await;
+        event_debug_scoped!("Config", "  notify_seconds_before = {:?}", notify_seconds_before).await;
+        event_debug_scoped!("Config", "  debounce_seconds = {:?}", debounce_seconds).await;
+        event_debug_scoped!("Config", "  lid_close_action = {:?}", lid_close_action).await;
+        event_debug_scoped!("Config", "  lid_open_action = {:?}", lid_open_action).await;
+        event_debug_scoped!("Config", "  lock_detection_type = {:?}", lock_detection_type).await;
+        event_debug_scoped!("Config", "  inhibit_apps = {:?}", inhibit_apps).await;
+        event_debug_scoped!("Stasis", "  actions:").await;
+
+        for action in actions {
+            let mut details = format!(
+                "    {}: timeout={}s, command=\"{}\"",
+                action.name, action.timeout, action.command
+            );
+            if let Some(lock_cmd) = &action.lock_command {
+                details.push_str(&format!(", lock_command=\"{}\"", lock_cmd));
             }
+            if let Some(resume_cmd) = &action.resume_command {
+                details.push_str(&format!(", resume_command=\"{}\"", resume_cmd));
+            }
+            if let Some(notification) = &action.notification {
+                details.push_str(&format!(", notification=\"{}\"", notification));
+                if let Some(notify_sec) = action.notify_seconds_before {
+                    details.push_str(&format!(", notify_seconds_before={}s", notify_sec));
+                }
+            }
+
+            event_debug_scoped!("Stasis", "{}", details).await;
         }
-        sdebug!("Stasis", "{}", &details);
-    }
+    });
 }
+

@@ -6,9 +6,8 @@ use tokio::time::sleep;
 use tokio::sync::Mutex;
 use chrono::{Local, NaiveTime, Timelike};
 
-use crate::{
-    core::manager::Manager, serror, sinfo
-};
+use crate::core::manager::Manager;
+use eventline::{event_info_scoped, event_error_scoped};
 
 pub const PAUSE_HELP_MESSAGE: &str = r#"Pause all timers indefinitely or for a specific duration/time
 
@@ -208,55 +207,55 @@ async fn pause_for_duration(
         mgr.pause(true).await;
     }
 
-    sinfo!("Stasis", "Idle maanager paused {}", reason);
+    // Clone reason for logging before passing to macro
+    let reason_for_log = reason.clone();
+    event_info_scoped!("Stasis", "Idle manager paused {}", reason_for_log).await;
 
-    // Clone for the spawned task
-    let reason_clone = reason.clone();
-    let notification_msg_clone = notification_msg.clone();
-    
-    // Spawn a task to auto-resume after duration
+    // Clone again for the async task
+    let reason_for_task = reason.clone();
+    let notification_for_task = notification_msg.clone();
+    let manager_clone = manager.clone();
+
+    // Spawn a task to auto-resume after the duration
     tokio::spawn(async move {
         sleep(duration).await;
-        
-        let mut mgr = manager.lock().await;
-        
-        // Only clear the manual pause flag
+
+        let mut mgr = manager_clone.lock().await;
+
         if mgr.state.inhibitors.manually_paused {
             mgr.state.inhibitors.manually_paused = false;
-            
-            // Check if we should actually unpause based on inhibitor count
-            let should_notify = if let Some(cfg) = &mgr.state.cfg {
-                cfg.notify_on_unpause
-            } else {
-                false
-            };
 
-            if mgr.state.inhibitors.active_inhibitor_count == 0 {
+            // Determine if we should notify
+            let should_notify = mgr.state.cfg.as_ref().map(|cfg| cfg.notify_on_unpause).unwrap_or(false);
+            let active_inhibitors = mgr.state.inhibitors.active_inhibitor_count;
+
+            if active_inhibitors == 0 {
                 mgr.state.inhibitors.paused = false;
-                sinfo!("Stasis", "Auto-resuming after {}", reason_clone);
-           
-                // Send notification - manual pause lifted and fully resumed
+
+                // Fresh clone for macro
+                let reason_clone = reason_for_task.clone();
+                event_info_scoped!("Stasis", "Auto-resuming after {}", reason_clone).await;
+
                 if should_notify {
-                    send_notification(
-                        "Stasis resumed",
-                        &notification_msg_clone
-                    ).await;
+                    send_notification("Stasis resumed", &notification_for_task).await;
                 }
             } else {
-                sinfo!("Stasis", "Auto-resume timer expired after {} but {} inhibitor(s) still active", reason_clone, mgr.state.inhibitors.active_inhibitor_count);
-                
-                // Send notification - manual pause lifted but still inhibited
+                // Fresh clone for macro
+                let reason_clone = reason_for_task.clone();
+                event_info_scoped!(
+                    "Stasis",
+                    "Auto-resume timer expired after {} but {} inhibitor(s) still active",
+                    reason_clone,
+                    active_inhibitors
+                ).await;
+
                 if should_notify {
-                    let inhibitor_word = if mgr.state.inhibitors.active_inhibitor_count == 1 {
-                        "inhibitor"
-                    } else {
-                        "inhibitors"
-                    };
+                    let inhibitor_word = if active_inhibitors == 1 { "inhibitor" } else { "inhibitors" };
                     send_notification(
                         "Stasis - manual pause expired",
                         &format!(
                             "Manual pause timer expired, but {} {} still active. Timers remain paused.",
-                            mgr.state.inhibitors.active_inhibitor_count,
+                            active_inhibitors,
                             inhibitor_word
                         )
                     ).await;
@@ -338,7 +337,7 @@ async fn send_notification(summary: &str, body: &str) {
         .arg(body)
         .spawn()
     {
-        serror!("Stasis", "Failed to send notification: {}", e);
+        event_error_scoped!("Stasis", "Failed to send notification: {}", e).await;
     }
 }
 

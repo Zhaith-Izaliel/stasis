@@ -1,6 +1,6 @@
 use super::Manager;
 use super::helpers::profile_to_stasis_config;
-use crate::sdebug;
+use eventline::event_debug_scoped;
 
 impl Manager {
     pub async fn set_profile(&mut self, profile_name: Option<&str>) -> Result<String, String> {
@@ -19,7 +19,7 @@ impl Manager {
                 .ok_or_else(|| format!("Profile '{}' not found", name))?;
             profile_to_stasis_config(profile)
         } else {
-            crate::config::parser::load_combined_config()
+            crate::config::parser::load_combined_config().await
                 .map(|combined| combined.base)
                 .map_err(|e| format!("Failed to load base config: {}", e))?
         };
@@ -32,20 +32,19 @@ impl Manager {
         // Reset media inhibitor - FIXED: properly handle browser tab counting
         {
             use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor};
-            use crate::sdebug;
             
-            sdebug!("Stasis", "Resetting media state for profile change");
+            event_debug_scoped!("Stasis", "Resetting media state for profile change").await;
             
             // MPRIS media: decrement once if active
             if self.state.media.mpris_media_playing {
-                sdebug!("Stasis", "Clearing MPRIS media inhibitor");
+                event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor").await;
                 decr_active_inhibitor(self, InhibitorSource::Media).await;
             }
             
             // Browser media: decrement once PER TAB (not just once!)
             let tab_count = self.state.media.browser_playing_tab_count;
             if tab_count > 0 {
-                sdebug!("Stasis", "Clearing {} browser tab inhibitors", tab_count);
+                event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count).await;
                 for _ in 0..tab_count {
                     decr_active_inhibitor(self, InhibitorSource::Media).await;
                 }
@@ -59,7 +58,7 @@ impl Manager {
             self.state.media.browser_playing_tab_count = 0;
             // Don't reset media_bridge_active - it's independent of profile
             
-            sdebug!("Stasis", "Media state reset complete");
+            event_debug_scoped!("Stasis", "Media state reset complete").await;
         }
         
         // Refresh app inhibitors config
@@ -75,7 +74,7 @@ impl Manager {
         if !media_enabled {
             use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor};
 
-            sdebug!("Stasis", "Profile does not enable media; force disabling all media handling");
+            event_debug_scoped!("Stasis", "Profile does not enable media; force disabling all media handling").await;
 
             // Clear MPRIS inhibitor if active
             if self.state.media.mpris_media_playing {

@@ -17,7 +17,7 @@ pub struct Args {
     pub command: Option<Command>
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     #[command(about = "Reload the configuration without restarting Stasis")]
     Reload,

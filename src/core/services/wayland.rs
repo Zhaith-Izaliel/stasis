@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::fmt;
 
 use crate::core::manager::Manager;
-use crate::{sdebug, serror, sinfo};
 
 use tokio::sync::Notify;
 
@@ -19,6 +18,8 @@ use wayland_protocols::wp::idle_inhibit::zv1::client::{
     zwp_idle_inhibit_manager_v1::{ZwpIdleInhibitManagerV1, Event as InhibitMgrEvent},
     zwp_idle_inhibitor_v1::{ZwpIdleInhibitorV1, Event as InhibitorEvent},
 };
+
+use eventline::{event_info_scoped, event_error_scoped, event_debug_scoped};
 
 #[derive(Debug)]
 pub enum WaylandError {
@@ -69,7 +70,6 @@ impl WaylandIdleData {
     }
 }
 
-
 /// Bind registry globals
 impl Dispatch<wl_registry::WlRegistry, ()> for WaylandIdleData {
     fn event(
@@ -85,16 +85,22 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandIdleData {
                 "ext_idle_notifier_v1" => {
                     state.idle_notifier =
                         Some(registry.bind::<ExtIdleNotifierV1, _, _>(name, 1, qh, ()));
-                    sinfo!("Wayland", "Binding ext_idle_notifier_v1");
+                    let _ = tokio::spawn(async move {
+                        event_info_scoped!("Wayland", "Binding ext_idle_notifier_v1").await;
+                    });
                 }
                 "wl_seat" => {
                     state.seat = Some(registry.bind::<WlSeat, _, _>(name, 1, qh, ()));
-                    sinfo!("Wayland", "Binding wl_seat");
+                    let _ = tokio::spawn(async move {
+                        event_info_scoped!("Wayland", "Binding wl_seat").await;
+                    });
                 }
                 "zwp_idle_inhibit_manager_v1" => {
                     state.inhibit_manager =
                         Some(registry.bind::<ZwpIdleInhibitManagerV1, _, _>(name, 1, qh, ()));
-                    sinfo!("Wayland", "Binding zwp_idle_inhibit_manager_v1");
+                    let _ = tokio::spawn(async move {
+                        event_info_scoped!("Wayland", "Binding zwp_idle_inhibit_manager_v1").await;
+                    });
                 }
                 _ => {}
             }
@@ -127,29 +133,25 @@ impl Dispatch<ExtIdleNotificationV1, ()> for WaylandIdleData {
 
         tokio::spawn(async move {
             if inhibited {
-                sdebug!("Wayland", "Idle inhibited, skipping idle trigger");
+                event_debug_scoped!("Wayland", "Idle inhibited, skipping idle trigger").await;
                 return;
             }
 
             let mut mgr = manager.lock().await;
 
             match event {
-                IdleEvent::Idled => {
-                    // Handled internally by libinput
-                }
+                IdleEvent::Idled => {}
                 IdleEvent::Resumed => { 
                     if mgr.state.lock.is_locked && !mgr.state.actions.post_lock_resume_queue.is_empty() {
-                        sinfo!("Wayland", "Activity detected while locked - firing post-lock resume commands");
+                        event_info_scoped!("Wayland", "Activity detected while locked - firing post-lock resume commands").await;
                         mgr.fire_post_lock_resume_queue().await;
                     }
-
                 }
                 _ => {}
             }
         });
     }
 }
-
 
 impl Dispatch<ZwpIdleInhibitorV1, ()> for WaylandIdleData {
     fn event(
@@ -161,7 +163,10 @@ impl Dispatch<ZwpIdleInhibitorV1, ()> for WaylandIdleData {
         _: &QueueHandle<Self>,
     ) {
         state.active_inhibitors += 1;
-        sdebug!("Wayland", "Inhibitor created, count={}", state.active_inhibitors);
+        let count = state.active_inhibitors;
+        let _ = tokio::spawn(async move {
+            event_debug_scoped!("Wayland", "Inhibitor created, count={}", count).await;
+        });
     }
 }
 
@@ -176,7 +181,10 @@ impl Dispatch<ZwpIdleInhibitManagerV1, ()> for WaylandIdleData {
     ) {
         if state.active_inhibitors > 0 {
             state.active_inhibitors -= 1;
-            sdebug!("Wayland", "Inhibitor removed, count={}", state.active_inhibitors);
+            let count = state.active_inhibitors;
+            let _ = tokio::spawn(async move {
+                event_debug_scoped!("Wayland", "Inhibitor removed, count={}", count).await;
+            });
         }
     }
 }
@@ -192,39 +200,34 @@ impl Dispatch<WlSeat, ()> for WaylandIdleData {
     ) {}
 }
 
-
 pub async fn setup(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     respect_inhibitors: bool,
 ) -> Result<Arc<tokio::sync::Mutex<WaylandIdleData>>, WaylandError> {
-    sinfo!("Wayland", "Setting up idle detection (respect inhibitors={})", respect_inhibitors);
+    event_info_scoped!("Wayland", "Setting up idle detection (respect inhibitors={})", respect_inhibitors).await;
 
-    // Connect to Wayland
     let conn = Connection::connect_to_env()
         .map_err(|e| WaylandError::ConnectionFailed(e.to_string()))?;
     let mut event_queue = conn.new_event_queue();
     let qh = event_queue.handle();
     let display = conn.display();
 
-    // Initialize WaylandIdleData
     let mut app_data = WaylandIdleData::new(manager.clone(), respect_inhibitors);
 
-    // Bind globals
     let _registry = display.get_registry(&qh, ());
     event_queue.roundtrip(&mut app_data)
         .map_err(|e| WaylandError::DispatchError(e.to_string()))?;
 
-    // Request idle notification if both notifier and seat are available
     if let (Some(notifier), Some(seat)) = (&app_data.idle_notifier, &app_data.seat) {
         let timeout_ms = 500;
         let notification = notifier.get_idle_notification(timeout_ms, seat, &qh, ());
         app_data.notification = Some(notification);
-        sdebug!("Wayland", "Idle detection active")
+        let _ = tokio::spawn(async move {
+            event_debug_scoped!("Wayland", "Idle detection active").await;
+        });
     }
 
     let should_stop = Arc::clone(&app_data.should_stop);
-    
-    // Wrap in Arc<Mutex>
     let app_data = Arc::new(tokio::sync::Mutex::new(app_data));
 
     let shutdown_flag = {
@@ -232,7 +235,6 @@ pub async fn setup(
         Arc::clone(&mgr.state.shutdown_flag)
     };
 
-    // Spawn task to set stop flag when shutdown is triggered
     tokio::spawn({
         let should_stop = Arc::clone(&should_stop);
         async move {
@@ -241,30 +243,36 @@ pub async fn setup(
         }
     });
 
-    // Event loop using blocking_dispatch in a blocking task
     tokio::task::spawn_blocking({
         let app_data = Arc::clone(&app_data);
         move || {
-            sdebug!("Wayland", "Event loop started");
+            let _ = tokio::runtime::Handle::current().block_on(async {
+                event_debug_scoped!("Wayland", "Event loop started").await;
+            });
+
             loop {
                 if should_stop.load(Ordering::Relaxed) {
                     break;
                 }
-                
+
                 let mut locked_data = tokio::runtime::Handle::current()
                     .block_on(app_data.lock());
-                
-                // Use blocking_dispatch which waits for events
+
                 match event_queue.blocking_dispatch(&mut *locked_data) {
                     Ok(_) => {},
                     Err(e) => {
-                        serror!("Wayland", "Dispatch error {}", e);
+                        let msg = e.to_string();
+                        let _ = tokio::spawn(async move {
+                            event_error_scoped!("Wayland", "Dispatch error {}", msg).await;
+                        });
                         break;
                     }
                 }
             }
 
-            sinfo!("Wayland", "event loop shutting down...");
+            let _ = tokio::spawn(async move {
+                event_info_scoped!("Wayland", "Event loop shutting down...").await;
+            });
         }
     });
 

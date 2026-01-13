@@ -1,6 +1,6 @@
 use std::fs;
 use crate::core::utils::{detect_chassis, ChassisKind};
-use crate::sinfo;
+use eventline::{event_info_scoped};
 
 pub fn ensure_user_config_exists() -> std::io::Result<()> {
     if let Some(mut path) = dirs::home_dir() {
@@ -18,7 +18,7 @@ pub fn ensure_user_config_exists() -> std::io::Result<()> {
         
         let contents = generate_default_config();
         fs::write(&path, contents)?;
-        sinfo!("Stasis", "Default config config created at {:?}", path);
+        tokio::spawn(event_info_scoped!("Stasis", "Default config config created at {:?}", path));
     }
     Ok(())
 }

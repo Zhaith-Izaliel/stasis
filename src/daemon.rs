@@ -25,21 +25,23 @@ use crate::{
             wayland::setup as setup_wayland
         }
     }, 
-    
-    ipc, 
-    sinfo, 
-    serror
+    ipc
 };
+use eventline::{event_info_scoped, event_error_scoped};
+use eventline::runtime::log_level::{set_log_level, LogLevel};
 
 /// Spawn the daemon with all its background services
 pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), DaemonError> {
     // Load config
+    // Set log level based on verbose flag
     if verbose {
-        sinfo!("Stasis", "Verbose mode enabled");
-        crate::log::set_verbose(true);
+        set_log_level(LogLevel::Debug);
+        event_info_scoped!("Stasis", "Verbose mode enabled, log level set to DEBUG").await;
+    } else {
+        set_log_level(LogLevel::Info);
     }
-    
-    let combined_cfg = load_combined_config()
+
+    let combined_cfg = load_combined_config().await
         .map_err(|_| DaemonError::ConfigLoadFailed)?;
     let cfg = Arc::new(combined_cfg.base.clone());
     let manager = Manager::new_with_profiles(&combined_cfg);
@@ -52,20 +54,18 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
         mgr.tasks.spawn_limited(spawn_lock_watcher(Arc::clone(&manager)));
         mgr.tasks.spawn_limited(spawn_input_task(Arc::clone(&manager)));
     }
- 
+
     // Spawn suspend event listener
     let dbus_manager = Arc::clone(&manager);
     tokio::spawn(async move {
         if let Err(e) = listen_for_power_events(dbus_manager).await {
-            serror!("D-Bus", "suspend event listener failed {}", e);
+            tokio::spawn(event_error_scoped!("D-Bus", "Suspend event listener failed: {}", e));
         }
     });
 
     // Initial AC/battery detection (synchronously)
-    {
-        detect_initial_power_state(&manager).await;
-    }
-    
+    detect_initial_power_state(&manager).await;
+
     // AC/battery detection (background task)
     let laptop_manager = Arc::clone(&manager);
     tokio::spawn(spawn_power_source_monitor(laptop_manager));
@@ -75,25 +75,26 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
         let mut mgr = manager.lock().await;
         mgr.trigger_instant_actions().await;
     }
-    
+
+    // Spawn app inhibit task
     {
         let (app_inhibitor, app_inhibitor_handle) = spawn_app_inhibit_task(Arc::clone(&manager)).await;
         let mut mgr_guard = manager.lock().await;
         mgr_guard.tasks.app_inhibitor_task_handle = Some(app_inhibitor_handle);
         mgr_guard.state.app.attach_inhibitor(app_inhibitor);
     }
-   
+
     // Spawn media monitors
     if cfg.monitor_media {
-        // MPRIS monitor (handles all non-Firefox players, or Firefox when bridge is unavailable)
+        // MPRIS monitor
         if let Err(e) = spawn_media_monitor_dbus(Arc::clone(&manager)).await {
-            serror!("MPRIS", "Failed to spawn media monitor: {}", e);
+            tokio::spawn(event_error_scoped!("MPRIS", "Failed to spawn media monitor: {}", e));
         }
-        
-        // Browser bridge detector (monitors for Firefox bridge and spawns dedicated monitor)
+
+        // Browser bridge detector
         spawn_browser_bridge_detector(Arc::clone(&manager)).await;
     }
-    
+
     // Wayland inhibitors integration loop setup
     let wayland_manager = Arc::clone(&manager);
     setup_wayland(
@@ -112,10 +113,10 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     // Shutdown watcher loops
     setup_shutdown_handler(Arc::clone(&manager)).await;
     spawn_wayland_monitor(Arc::clone(&manager)).await;
-    
+
     // Log startup message
-    sinfo!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len());
-    
+    tokio::spawn(event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len()));
+
     // Run main async tasks
     let local = LocalSet::new();
     local.run_until(std::future::pending::<()>()).await;
@@ -136,20 +137,20 @@ async fn setup_shutdown_handler(
         async move {
             tokio::select! {
                 _ = sigint.recv() => {
-                    sinfo!("Stasis", "Received SIGINT, shutting down...");
+                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGINT, shutting down..."));
                 },
                 _ = sigterm.recv() => {
-                    sinfo!("Stasis", "Received SIGTERM, shutting down...");
+                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGTERM, shutting down..."));
                 },
                 _ = sighup.recv() => {
-                    sinfo!("Stasis", "Received SIGHUP, shutting down...");
+                    tokio::spawn(event_info_scoped!("Stasis", "Received SIGHUP, shutting down..."));
                 },
             }
 
             manager.lock().await.shutdown().await;
 
             let _ = std::fs::remove_file(SOCKET_PATH);
-            sinfo!("Stasis", "Shutdown complete, goodbye!");
+            tokio::spawn(event_info_scoped!("Stasis", "Shutdown complete, goodbye!"));
             std::process::exit(0);
         }
     });
@@ -160,7 +161,7 @@ async fn spawn_wayland_monitor(
     manager: Arc<Mutex<Manager>>,
 ) {
     use tokio::net::UnixStream;
-    
+
     // Capture env vars once
     let wayland_display = match std::env::var("WAYLAND_DISPLAY") {
         Ok(display) => display,
@@ -175,12 +176,12 @@ async fn spawn_wayland_monitor(
 
             // Try connecting to the Wayland socket
             if UnixStream::connect(&socket_path).await.is_err() {
-                sinfo!("Stasis", "Wayland compositor is no longer responding, shutting down...");
+                tokio::spawn(event_info_scoped!("Stasis", "Wayland compositor is no longer responding, shutting down..."));
 
                 manager.lock().await.shutdown().await;
 
                 let _ = std::fs::remove_file(SOCKET_PATH);
-                sinfo!("Stasis", "Shutdown complete, goodbye!");
+                tokio::spawn(event_info_scoped!("Stasis", "Shutdown complete, goodbye!"));
                 std::process::exit(0);
             }
         }

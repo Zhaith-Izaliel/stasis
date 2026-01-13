@@ -3,7 +3,7 @@ use crate::core::manager::{
     Manager, 
     processes::{run_command_detached, run_command_silent, is_process_running}
 };
-use crate::{sdebug, serror, sinfo, swarn};
+use eventline::{event_info_scoped, event_debug_scoped, event_warn_scoped, event_error_scoped};
 
 #[derive(Debug, Clone)]
 pub enum ActionRequest {
@@ -23,17 +23,13 @@ pub async fn prepare_action(action: &IdleActionBlock) -> Vec<ActionRequest> {
             }
         }
         IdleAction::LockScreen => {
-            let probe_cmd = if let Some(ref lock_cmd) = action.lock_command {
-                lock_cmd
-            } else {
-                &action.command
-            };
+            let probe_cmd = action.lock_command.clone().unwrap_or(action.command.clone());
             
-            if is_process_running(probe_cmd).await {
-                sinfo!("Stasis", "Lockscreen already running, skipping action.");
-                vec![ActionRequest::Skip(probe_cmd.to_string())]
+            if is_process_running(&probe_cmd).await {
+                event_info_scoped!("Stasis", "Lockscreen already running, skipping action.").await;
+                vec![ActionRequest::Skip(probe_cmd)]
             } else {
-                vec![ActionRequest::RunCommand(action.command.clone())]
+                vec![ActionRequest::RunCommand(cmd)]
             }
         }
         _ => {
@@ -47,85 +43,84 @@ pub async fn prepare_action(action: &IdleActionBlock) -> Vec<ActionRequest> {
 }
 
 pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
-    sdebug!("Stasis", "Action triggered: name=\"{}\" kind={:?} timeout={} command=\"{}\"", action.name, action.kind, action.timeout, action.command);
+    let name = action.name.clone();
+    let command = action.command.clone();
+    let kind = action.kind.clone(); 
+    let timeout = action.timeout;
 
-    // For lock actions using loginctl, run the command but don't manage state
-    // The LoginctlLock event will handle setting up the lock state
-    if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
-        // Check if using logind detection
+    // --- FIX FOR ERRORS 1 & 2 (kind and command) ---
+    // We create clones specifically for the macro to "consume"
+    let kind_for_log = kind.clone();
+    let cmd_for_log = command.clone();
+
+    event_debug_scoped!(
+        "Stasis",
+        "Action triggered: name=\"{}\" kind={:?} timeout={} command=\"{}\"",
+        name,
+        kind_for_log, // Macro moves 'kind_for_log'
+        timeout,
+        cmd_for_log   // Macro moves 'cmd_for_log'
+    ).await; 
+    // 'kind' and 'command' are still safe to use below!
+
+    // Lock screen handling
+    if matches!(kind, IdleAction::LockScreen) {
         use crate::config::model::LockDetectionType;
-        let use_logind = if let Some(cfg) = &mgr.state.cfg {
-            matches!(cfg.lock_detection_type, LockDetectionType::Logind)
-        } else {
-            false
-        };
+        let use_logind = mgr.state.cfg
+            .as_ref()
+            .map(|cfg| matches!(cfg.lock_detection_type, LockDetectionType::Logind))
+            .unwrap_or(false);
 
-        if use_logind {
-            sdebug!("Stasis", "Using logind detection for lock stase");
-            
-            if action.command.contains("loginctl lock-session") {
-                if let Err(e) = run_command_detached(&action.command).await {
-                    serror!("Stasis", "Failed to run loginctl lock-session: {}", e);
-                }
-                return;
-            }
-        } else if action.command.contains("loginctl lock-session") {
-            // Legacy behavior for process detection with loginctl
-            if let Err(e) = run_command_detached(&action.command).await {
-                serror!("Stasis", "Failed to run loginctl lock-session: {}", e);
+        if use_logind && command.contains("loginctl lock-session") {
+            if let Err(e) = run_command_detached(&command).await {
+                event_error_scoped!("Stasis", "Failed loginctl lock-session '{}': {}", command, e).await;
             }
             return;
         }
-        
+
         if mgr.state.lock.is_locked {
-            sdebug!("Stasis", "Lock screen action skipped: already locked");
+            event_debug_scoped!("Stasis", "Lock screen action skipped: already locked").await;
             return;
         }
-    }
 
-    if matches!(action.kind, crate::config::model::IdleAction::LockScreen) {
         mgr.state.lock.is_locked = true;
         mgr.state.lock_notify.notify_one();
-        sinfo!("Stasis", "Lock screen action trigerred, notifying lock watcher");
+        event_info_scoped!("Stasis", "Lock screen action triggered").await;
     }
 
-    // Handle pre-suspend for Suspend actions
-    if matches!(action.kind, crate::config::model::IdleAction::Suspend) {
+    // Pre-suspend
+    if matches!(kind, IdleAction::Suspend) {
         if let Some(cfg) = &mgr.state.cfg {
-            if let Some(ref cmd) = cfg.pre_suspend_command {
-                sinfo!("Stasis", "Running pre-suspend command: {}", cmd); 
-                let should_wait = match run_command_detached(cmd).await {
-                    Ok(pid) => {
-                        sdebug!("Stasis", "Pre-suspend command started with PID {}", pid.pid);
-                        true
-                    }
-                    Err(e) => {
-                        serror!("Stasis", "Pre-suspend command failed: {}", e);
-                        true
-                    }
-                };
-                // Wait 500ms before proceeding to suspend
-                if should_wait {
+            if let Some(pre_suspend) = &cfg.pre_suspend_command {
+                let pre_suspend_cmd = pre_suspend.clone();
+                
+                // --- FIX FOR ERROR 3 (pre_suspend_cmd) ---
+                let pre_suspend_for_log = pre_suspend_cmd.clone();
+                event_info_scoped!("Stasis", "Running pre-suspend command: {}", pre_suspend_for_log).await;
+                
+                // Now we can safely borrow the original
+                if let Err(e) = run_command_detached(&pre_suspend_cmd).await {
+                    event_error_scoped!("Stasis", "Pre-suspend command failed: {}", e).await;
+                } else {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
             }
         }
     }
 
+    // Prepare and run actual action
     let requests = prepare_action(action).await;
     for req in requests {
         match req {
-            ActionRequest::RunCommand(cmd) => {
-                run_command_for_action(mgr, action, cmd).await;
-            }
+            ActionRequest::RunCommand(cmd) => run_command_for_action(mgr, action, cmd).await,
             ActionRequest::Skip(_) => {}
         }
     }
 }
 
 pub async fn run_command_for_action(
-    mgr: &mut crate::core::manager::Manager, 
-    action: &crate::config::model::IdleActionBlock, 
+    mgr: &mut Manager, 
+    action: &IdleActionBlock, 
     cmd: String
 ) {
     use crate::config::model::IdleAction;
@@ -136,75 +131,101 @@ pub async fn run_command_for_action(
         let is_loginctl = cmd.contains("loginctl lock-session");
 
         if is_loginctl {
-            // Case 1: loginctl path
-            sinfo!("Stasis", "Lock triggered via loginctl");
+            event_info_scoped!("Stasis", "Lock triggered via loginctl").await;
 
-            // Fire loginctl (do not track)
             if let Err(e) = run_command_detached(&cmd).await {
-                sinfo!("Stasis", "Failed to run loginctl: {}", e);
+                let cmd_owned = cmd.clone();
+                event_error_scoped!("Stasis", "Failed to run loginctl '{}': {}", cmd_owned, e).await;
             }
 
-            // Now run and track the real lock-command
-            if let Some(ref lock_cmd) = action.lock_command {
-                sinfo!("Stasis", "Running and tracking lock-command: {}", lock_cmd);
+            if let Some(lock_cmd) = &action.lock_command {
+                let lock_cmd_owned = lock_cmd.clone();
+                event_info_scoped!("Stasis", "Running and tracking lock-command: {}", lock_cmd_owned).await;
 
                 match run_command_detached(lock_cmd).await {
                     Ok(process_info) => {
                         mgr.state.lock.process_info = Some(process_info.clone());
                         mgr.state.lock.is_locked = true;
-
-                        sinfo!("Stasis", "Lock started: PID={}, PGID={}", process_info.pid, process_info.pgid);
+                        event_info_scoped!(
+                            "Stasis",
+                            "Lock started: PID={}, PGID={}",
+                            process_info.pid,
+                            process_info.pgid
+                        ).await;
                     }
-                    Err(e) => serror!("Stasis", "Failed to run lock-command '{}': {}", lock_cmd, e),
+                    Err(e) => {
+                        let lock_cmd_owned = lock_cmd.clone();
+                        event_error_scoped!(
+                            "Stasis",
+                            "Failed to run lock-command '{}': {}",
+                            lock_cmd_owned,
+                            e
+                        ).await;
+                    }
                 }
             } else {
-                swarn!("Stasis", "loginctl used but no lock-command configured.");
+                event_warn_scoped!("Stasis", "loginctl used but no lock-command configured.").await;
                 mgr.state.lock.is_locked = true;
             }
 
             return;
         }
 
-        // Case 2: normal locker (anything except loginctl)
-        sinfo!("Stasis", "Running lock command: {}", cmd);
+        // Normal locker
+        let cmd_owned = cmd.clone();
+        event_info_scoped!("Stasis", "Running lock command: {}", cmd_owned).await;
 
         match run_command_detached(&cmd).await {
             Ok(mut process_info) => {
-                // lock-command = process name override, not a command to run
-                if let Some(ref lock_cmd) = action.lock_command {
-                    sinfo!("Stasis", "Using lock-command as process name override: {}", lock_cmd);
-                    process_info.expected_process_name = Some(lock_cmd.clone());
+                if let Some(lock_cmd) = &action.lock_command {
+                    let lock_cmd_owned = lock_cmd.clone();
+                    process_info.expected_process_name = Some(lock_cmd_owned.clone());
+                    event_info_scoped!("Stasis", "Using lock-command as process name override: {}", lock_cmd_owned).await;
                 }
 
                 mgr.state.lock.process_info = Some(process_info.clone());
                 mgr.state.lock.is_locked = true;
 
-                sinfo!("Stasis", "Lock started: PID={}, PGID={}, Tracking={:?}", process_info.pid, process_info.pgid, process_info.expected_process_name);
+                event_info_scoped!(
+                    "Stasis",
+                    "Lock started: PID={}, PGID={}, Tracking={:?}",
+                    process_info.pid,
+                    process_info.pgid,
+                    process_info.expected_process_name
+                ).await;
             }
-
-            Err(e) => serror!("Stasis", "Failed to run '{}' => {}", cmd, e), 
+            Err(e) => {
+                let cmd_owned = cmd.clone();
+                event_error_scoped!("Stasis", "Failed to run '{}': {}", cmd_owned, e).await;
+            }
         }
 
         return;
     }
 
-    // NON-lock Case    
-    sinfo!(
+    // NON-lock actions
+    let cmd_owned = cmd.clone();
+    let action_type = match action.kind {
+        IdleAction::Suspend => "suspend",
+        IdleAction::Brightness => "brightness",
+        IdleAction::Dpms => "DPMS",
+        _ => "action",
+    };
+
+    event_info_scoped!(
         "Stasis",
         "Running {} command: {}",
-        match action.kind {
-            IdleAction::Suspend => "suspend",
-            IdleAction::Brightness => "brightness",
-            IdleAction::Dpms => "DPMS",
-            _ => "action",
-        },
-        cmd
-    );
+        action_type,
+        cmd_owned
+    ).await;
 
+    let cmd_owned_for_spawn = cmd.clone();
     let spawned = tokio::spawn(async move {
-        if let Err(e) = run_command_silent(&cmd).await {
-            serror!("Stasis", "Failed to run command '{}': {}", cmd, e);
+        if let Err(e) = run_command_silent(&cmd_owned_for_spawn).await {
+            let cmd_for_err = cmd_owned_for_spawn.clone();
+            event_error_scoped!("Stasis", "Failed to run command '{}': {}", cmd_for_err, e).await;
         }
     });
+
     mgr.tasks.spawned_tasks.push(spawned);
 }

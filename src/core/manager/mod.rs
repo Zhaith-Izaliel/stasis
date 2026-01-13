@@ -23,10 +23,8 @@ use crate::{
         processes::{is_process_running, run_command_detached},
         tasks::TaskManager,
     },
-    sinfo,
-    sdebug,
-    serror,
 };
+use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped};
 
 #[derive(Debug)]
 pub struct Manager {
@@ -56,7 +54,7 @@ impl Manager {
 
         let instant_actions = self.state.get_active_instant_actions();
 
-        sinfo!("Stasis", "Triggering instant actions...");
+        event_info_scoped!("Stasis", "Triggering instant actions...").await;
         for action in instant_actions {
             run_action(self, &action).await;
         }
@@ -76,12 +74,12 @@ impl Manager {
         }
         self.state.actions.action_index = index;
 
-        sdebug!("Stasis", "Instant actions complete, starting at index {}", index);
+        event_debug_scoped!("Stasis", "Instant actions complete, starting at index {}", index).await;
     }
 
     pub fn reset_instant_actions(&mut self) {
         self.state.actions.instants_triggered = false;
-        sdebug!("Stasis", "Instant actions reset");
+        tokio::spawn(event_debug_scoped!("Stasis", "Instant actions reset"));
     }
 
     // Check if any actions have surpassed their timeout period
@@ -134,21 +132,16 @@ impl Manager {
 
         let has_notification = actions[index].notification.is_some();
         
-        // Determine if we should use per-action timeout or global timeout
-        // Check if ANY action has a per-action notification timeout configured
         let has_any_per_action_timeout = actions.iter()
             .any(|a| a.notify_seconds_before.is_some());
         
-        // Determine notification settings for current action
         let (notify_enabled, notify_seconds) = if has_any_per_action_timeout {
-            // Use per-action timeout if configured, otherwise skip notifications for this action
             if let Some(per_action_timeout) = actions[index].notify_seconds_before {
                 (true, per_action_timeout)
             } else {
                 (false, 0)
             }
         } else {
-            // Fall back to global settings
             (global_notify_enabled, global_notify_seconds)
         };
 
@@ -163,10 +156,14 @@ impl Manager {
             if now >= base_timeout_instant {
                 if let Some(ref notification_msg) = actions[index].notification {
                     let notify_cmd = format!("notify-send -a Stasis '{}'", notification_msg);
-                    sinfo!("Stasis", "Sending pre-action notification: {}", notification_msg);
+                    
+                    // Fix: Clone for macro capture
+                    let msg_for_log = notification_msg.clone();
+                    event_info_scoped!("Stasis", "Sending pre-action notification: {}", msg_for_log).await;
                     
                     if let Err(e) = run_command_detached(&notify_cmd).await {
-                        serror!("Stasis", "Failed to send notification: {}", e);
+                        // Fix: Using event_error_scoped with .await
+                        event_error_scoped!("Stasis", "Failed to send notification: {}", e).await;
                     }
                     
                     self.state.notifications.mark_sent();
@@ -191,7 +188,6 @@ impl Manager {
 
         self.state.notifications.reset();
 
-        // Determine which queue to add resume command to
         if action_clone.resume_command.is_some() {
             let has_lock = has_lock_action(self);
             let lock_index = get_lock_index(self);
@@ -200,26 +196,26 @@ impl Manager {
                 if has_lock {
                     if let Some(lock_idx) = lock_index {
                         if index < lock_idx {
-                            // Pre-lock action - save for unlock
-                            sdebug!("Stasis", "Queueing pre-lock resume for: {}", action_clone.name);
+                            // Fix: Shadow name for log
+                            let name_for_log = action_clone.name.clone();
+                            event_debug_scoped!("Stasis", "Queueing pre-lock resume for: {}", name_for_log).await;
                             self.state.actions.pre_lock_resume_queue.push(action_clone.clone());
                             
-                            // DPMS and Brightness exception: Also add to post-lock queue so it fires on reset while locked
                             if matches!(action_clone.kind, IdleAction::Dpms | IdleAction::Brightness) {
-                                sdebug!("Stasis", "{} action - also queueing for post-lock resume: {}", 
-                                    if matches!(action_clone.kind, IdleAction::Dpms) { "DPMS" } else { "Brightness" },
-                                    action_clone.name);
+                                let kind_str = if matches!(action_clone.kind, IdleAction::Dpms) { "DPMS" } else { "Brightness" };
+                                let name_for_log_2 = action_clone.name.clone();
+                                event_debug_scoped!("Stasis", "{} action - also queueing for post-lock resume: {}", kind_str, name_for_log_2).await;
                                 self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                             }
                         } else {
-                            // Post-lock action - fire on next reset while locked
-                            sdebug!("Stasis", "Queueing post-lock resume for: {}", action_clone.name);
+                            let name_for_log = action_clone.name.clone();
+                            event_debug_scoped!("Stasis", "Queueing post-lock resume for: {}", name_for_log).await;
                             self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                         }
                     }
                 } else {
-                    // No lock action - add to post-lock queue (will fire on reset)
-                    sdebug!("Stasis", "Queueing resume command for: {}", action_clone.name);
+                    let name_for_log = action_clone.name.clone();
+                    event_debug_scoped!("Stasis", "Queueing resume command for: {}", name_for_log).await;
                     self.state.actions.post_lock_resume_queue.push(action_clone.clone());
                 }
             }
@@ -240,7 +236,7 @@ impl Manager {
         let cfg = match &self.state.cfg {
             Some(cfg) => Arc::clone(cfg),
             None => {
-                sdebug!("Stasis", "No configuration available, skipping reset");
+                event_debug_scoped!("Stasis", "No configuration available, skipping reset").await;
                 return;
             }
         };
@@ -442,10 +438,10 @@ impl Manager {
     pub async fn pause(&mut self, manual: bool) {
         if manual {
             self.state.inhibitors.manually_paused = true;
-            sdebug!("Stasis", "Idle timers manually paused");
+            event_debug_scoped!("Stasis", "Idle timers manually paused").await;
         } else if !self.state.inhibitors.manually_paused {
             self.state.inhibitors.paused = true;
-            sdebug!("Stasis", "Idle timers automatically paused");
+            event_debug_scoped!("Stasis", "Idle timers automatically paused").await;
         }
     }
 
@@ -453,18 +449,21 @@ impl Manager {
         if manually {
             if self.state.inhibitors.manually_paused {
                 self.state.inhibitors.manually_paused = false;
-                
+
                 if self.state.inhibitors.active_inhibitor_count == 0 {
                     self.state.inhibitors.paused = false;
-                    sinfo!("Stasis", "Idle timers manually resumed");
+                    // No self reference captured in macro
+                    event_info_scoped!("Stasis", "Idle timers manually resumed").await;
                 } else {
-                    sinfo!("Stasis", "Manual paused cleaed, but {} inhibitor(s) still active", self.state.inhibitors.active_inhibitor_count);
+                    // Copy the value into a local variable first
+                    let active_count = self.state.inhibitors.active_inhibitor_count;
+                    event_info_scoped!("Stasis", "Manual paused cleared, but {} inhibitor(s) still active", active_count).await;
                 }
             }
         } else if !self.state.inhibitors.manually_paused && self.state.inhibitors.paused {
             // This is called by decr_active_inhibitor when count reaches 0
             self.state.inhibitors.paused = false;
-            sinfo!("Stasis", "Idle timers automatically resumed");
+            event_info_scoped!("Stasis", "Idle timers automatically resumed").await;
         }
     }
 

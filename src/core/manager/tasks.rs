@@ -1,6 +1,6 @@
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
-use crate::sinfo;
+use eventline::{event_info_scoped, event_error_scoped};
 
 /// Hard cap on concurrent background tasks.
 const MAX_SPAWNED_TASKS: usize = 10;
@@ -42,7 +42,7 @@ impl TaskManager {
         if self.spawned_tasks.len() < MAX_SPAWNED_TASKS {
             self.spawned_tasks.push(tokio::spawn(fut));
         } else {
-            sinfo!("Stasis", "Max spawned tasks reached, skipping task spawn");
+            tokio::spawn(event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn"));
         }
     }
 
@@ -50,16 +50,16 @@ impl TaskManager {
         let shutdown_timeout = Duration::from_millis(500);
 
         // Helper to await with timeout, falling back to abort
-        async fn await_or_abort(handle: JoinHandle<()>, name: &str, shutdown_timeout: Duration) {
+        async fn await_or_abort(handle: JoinHandle<()>, name: String, shutdown_timeout: Duration) {
             match timeout(shutdown_timeout, handle).await {
                 Ok(Ok(())) => {
                     // Task finished cleanly
                 }
                 Ok(Err(e)) => {
-                    sinfo!("Stasis", "{} task panicked: {}", name, e);
+                    event_error_scoped!("Stasis", "{} task panicked: {}", name, e).await;
                 }
                 Err(_) => {
-                    sinfo!("Stasis", "{} task didn't finish in time, aborting", name);
+                    event_info_scoped!("Stasis", "{} task didn't finish in time, aborting", name).await;
                     // Note: handle was consumed by timeout, already dropped
                 }
             }
@@ -67,19 +67,19 @@ impl TaskManager {
 
         // Await all tracked tasks
         if let Some(handle) = self.idle_task_handle.take() {
-            await_or_abort(handle, "Idle", shutdown_timeout).await;
+            await_or_abort(handle, "Idle".to_string(), shutdown_timeout).await;
         }
         if let Some(handle) = self.lock_task_handle.take() {
-            await_or_abort(handle, "Lock watcher", shutdown_timeout).await;
+            await_or_abort(handle, "Lock watcher".to_string(), shutdown_timeout).await;
         }
         if let Some(handle) = self.media_task_handle.take() {
-            await_or_abort(handle, "Media monitor", shutdown_timeout).await;
+            await_or_abort(handle, "Media monitor".to_string(), shutdown_timeout).await;
         }
         if let Some(handle) = self.input_task_handle.take() {
-            await_or_abort(handle, "Input", shutdown_timeout).await;
+            await_or_abort(handle, "Input".to_string(), shutdown_timeout).await;
         }
         if let Some(handle) = self.app_inhibitor_task_handle.take() {
-            await_or_abort(handle, "App inhibitor", shutdown_timeout).await;
+            await_or_abort(handle, "App inhibitor".to_string(), shutdown_timeout).await;
         }
 
         // Await spawned tasks
@@ -117,6 +117,6 @@ where
     if tasks.len() < MAX_SPAWNED_TASKS {
         tasks.push(tokio::spawn(fut));
     } else {
-        sinfo!("Stasis", "Max spawned tasks reached, skipping task spawn");
+        tokio::spawn(event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn"));
     }
 }

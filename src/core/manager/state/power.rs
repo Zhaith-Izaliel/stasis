@@ -1,8 +1,8 @@
 use crate::{
     config::model::IdleActionBlock,
     core::utils::{ChassisKind, detect_chassis},
-    sinfo,
 };
+use eventline::event_info_scoped;
 
 #[derive(Debug)]
 pub struct PowerState {
@@ -110,7 +110,7 @@ impl PowerState {
 
         if new_block != self.current_block {
             let old = std::mem::replace(&mut self.current_block, new_block.clone());
-            sinfo!("Stasis", "Switched block: {} → {}", old, new_block);
+            tokio::spawn(event_info_scoped!("Stasis", "Switched block: {} → {}", old, new_block));
             return true;
         }
 

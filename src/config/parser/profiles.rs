@@ -1,10 +1,9 @@
 use regex::Regex;
 use rune_cfg::{RuneConfig, Value};
+use eventline::{event_info_scoped, event_error_scoped};
 
 use crate::{
     config::model::*,
-    serror,
-    sinfo,
 };
 
 use super::actions::{collect_actions, is_special_key};
@@ -18,7 +17,8 @@ pub fn parse_profile(config: &RuneConfig, profile_name: &str, _base: &StasisConf
     // Actions
     let actions = collect_actions(config, &base_path)?;
     if actions.is_empty() {
-        sinfo!("Stasis", "Profile '{}' defines has no actions.", profile_name);
+        let profile_name_owned = profile_name.to_string();
+        tokio::spawn(event_info_scoped!("Stasis", "Profile '{}' defines has no actions.", profile_name_owned));
     }
 
     // Primitive fields: fallback to 'empty' values if undefined
@@ -156,7 +156,7 @@ pub fn load_profiles(config: &RuneConfig, base: &StasisConfig) -> Result<Vec<Pro
         match parse_profile(config, &profile_name, base) {
             Ok(profile) => profiles.push(profile),
             Err(e) => {
-                serror!("Stasis", "Failed to load profile '{}': {}", profile_name, e);
+                tokio::spawn(event_error_scoped!("Stasis", "Failed to load profile '{}': {}", profile_name, e));
             }
         }
     }

@@ -4,8 +4,10 @@ use tokio::sync::Mutex;
 use crate::{
     core::manager::{
         Manager, inhibitors::{InhibitorSource, decr_active_inhibitor, incr_active_inhibitor}, state::media::MediaState
-    }, sdebug, serror, sinfo
+    }
 };
+
+use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped};
 
 impl Manager {
     /// Synchronously check if media is playing and update inhibitor state accordingly
@@ -45,20 +47,20 @@ impl Manager {
         };
 
         if should_monitor {
-            sdebug!("MPRIS", "Restarting media monitor...");
+            event_debug_scoped!("MPRIS", "Restarting media monitor...").await;
             if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
                 Arc::clone(&manager_arc),
             )
             .await
             {
-                serror!("Stasis", "Failed to restart media monitor: {}", e);
+                event_error_scoped!("Stasis", "Failed to restart media monitor: {}", e).await;
             }
         }
     }
 
     /// Clean up all media monitoring state and inhibitors
     pub async fn cleanup_media_monitoring(&mut self) {
-        sinfo!("Stasis", "Cleaning up media monitoring state");
+        event_info_scoped!("Stasis", "Cleaning up media monitoring state").await;
 
         // Clear standard media inhibitor
         if self.state.media.media_playing {

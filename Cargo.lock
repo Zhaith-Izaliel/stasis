@@ -564,6 +564,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "eventline"
+version = "0.3.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aff8048d05d57f2317cf2dda25af84810f30b57a1d26bcb941a74e092a98b896"
+dependencies = [
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1423,6 +1436,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "dirs",
+ "eventline",
  "futures",
  "futures-util",
  "input",
@@ -1572,9 +1586,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
  "bytes",
  "libc",

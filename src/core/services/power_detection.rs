@@ -3,14 +3,16 @@ use tokio::sync::Mutex;
 
 use crate::core::manager::Manager;
 use crate::core::events::handlers::{handle_event, Event};
-use crate::{sdebug, sinfo};
+use eventline::{event_info_scoped, event_debug_scoped};
 
 /// Detect initial AC/Battery state.
 /// Returns true if on AC power.
 pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
     let mgr = manager.lock().await;
     if !mgr.state.is_laptop() {
-        sinfo!("Power", "Desktop detected, skipping power source check");
+        let _ = tokio::spawn(async {
+            event_info_scoped!("Power", "Desktop detected, skipping power source check").await;
+        });
         return true;
     }
     drop(mgr);
@@ -23,12 +25,16 @@ pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
     }
 
     let current_block = manager.lock().await.state.power.current_block.clone();
-    sdebug!(
-        "Power",
-        "Initial power detection: {} (active block: {})",
-        if on_ac { "AC" } else { "Battery" },
-        current_block
-    );
+    let _ = tokio::spawn(async move {
+        event_debug_scoped!(
+            "Power",
+            "Initial power detection: {} (active block: {})",
+            if on_ac { "AC" } else { "Battery" },
+            current_block
+        )
+        .await;
+    });
+
     on_ac
 }
 
@@ -86,11 +92,10 @@ pub async fn spawn_power_source_monitor(manager: Arc<Mutex<Manager>>) {
 
         if on_ac != last_on_ac {
             last_on_ac = on_ac;
-            sdebug!(
-                "Power",
-                "Power source changed: {}",
-                if on_ac { "AC" } else { "Battery" }
-            );
+            let source = if on_ac { "AC" } else { "Battery" };
+            let _ = tokio::spawn(async move {
+                event_debug_scoped!("Power", "Power source changed: {}", source).await;
+            });
 
             // Emit event instead of mutating state directly
             if on_ac {

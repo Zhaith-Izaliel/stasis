@@ -3,12 +3,13 @@ use tokio::{
     sync::Mutex, 
     time::{Instant as TokioInstant, sleep_until}
 };
+use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped};
 
 use crate::{
     core::manager::{
             Manager, 
             processes::{is_process_active, is_process_running, run_command_detached}
-        }, sdebug, serror, sinfo 
+        },
 };
 
 pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl Future<Output = ()> + Send {
@@ -57,7 +58,7 @@ pub fn spawn_idle_task(manager: Arc<Mutex<Manager>>) -> impl Future<Output = ()>
             }
         }
 
-        sinfo!("Stasis", "Main idle loop shutting down...");
+        event_info_scoped!("Stasis", "Main idle loop shutting down...").await;
     }
 }
 
@@ -83,7 +84,7 @@ pub fn spawn_lock_watcher(
                     tokio::select! {
                         _ = lock_notify.notified() => {},
                         _ = shutdown.notified() => {
-                            sinfo!("Stasis", "Lock watcher loop shutting down...");
+                            tokio::spawn(event_info_scoped!("Stasis", "Lock watcher loop shutting down..."));
                             return;
                         }
                     }
@@ -91,7 +92,7 @@ pub fn spawn_lock_watcher(
                 }
             }
 
-            sdebug!("Stasis", "Lock detected - entering lock watcher loop");
+            tokio::spawn(event_debug_scoped!("Stasis", "Lock detected - entering lock watcher loop"));
 
             // Monitor lock until it ends
             loop {
@@ -151,9 +152,9 @@ pub fn spawn_lock_watcher(
                         .find(|a| matches!(a.kind, IdleAction::LockScreen))
                     {
                         if let Some(resume_cmd) = &lock_action.resume_command {
-                            sinfo!("Stasis", "Firing lockscreen resume command");
+                            tokio::spawn(event_info_scoped!("Stasis", "Firing lockscreen resume command"));
                             if let Err(e) = run_command_detached(resume_cmd).await {
-                                serror!("Stasis", "Failed to run lock resume command: {}", e);
+                                tokio::spawn(event_error_scoped!("Stasis", "Failed to run lock resume command: {}", e));
                             }
                         }
                     }
@@ -167,7 +168,7 @@ pub fn spawn_lock_watcher(
 
                     mgr.reset().await;
 
-                    sinfo!("Stasis", "Lockscreen ended - exiting lock watcher");
+                    tokio::spawn(event_info_scoped!("Stasis", "Lockscreen ended - exiting lock watcher"));
                     break;
                 }
 
@@ -175,7 +176,7 @@ pub fn spawn_lock_watcher(
                     _ = lock_notify.notified() => {},
                     _ = sleep(Duration::from_millis(500)) => {},
                     _ = shutdown.notified() => {
-                        sinfo!("Stasis", "Lock watcher loop shutting down during active lock...");
+                        tokio::spawn(event_info_scoped!("Stasis", "Lock watcher loop shutting down during active lock..."));
                         return;
                     }
                 }
