@@ -1,11 +1,22 @@
 use std::{fs::{self, OpenOptions}, io::{Read, Write}, path::PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use once_cell::sync::Lazy;
 use eventline::runtime::log_level::{LogLevel, set_log_level};
 use eventline::runtime;
 use eventline::{event_info, event_debug};
 
+static NEW_RUN_MARKED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+
 /// Marks a new run in the live log file.
 /// Inserts a newline before the marker only if the file already has content.
 pub fn mark_new_run(log_path: &PathBuf, name: &str) {
+    // Only mark a new run once
+    if NEW_RUN_MARKED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    NEW_RUN_MARKED.store(true, Ordering::SeqCst);
+
     // Check if file already has content
     let mut need_newline = false;
     if let Ok(mut file) = OpenOptions::new().read(true).open(log_path) {
@@ -23,7 +34,6 @@ pub fn mark_new_run(log_path: &PathBuf, name: &str) {
         let _ = writeln!(file, "==== NEW RUN: {} ====", name);
     }
 }
-
 
 /// Returns the path for the Eventline journal
 pub fn get_log_path() -> PathBuf {

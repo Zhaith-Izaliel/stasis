@@ -13,7 +13,7 @@ use clap::Parser;
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::cli::Args;
-use utils::{init_logging, save_journal};
+use utils::save_journal;
 use eventline::runtime;
 use eventline::runtime::log_level::{set_log_level, LogLevel};
 use eventline::{event_info_scoped, event_warn_scoped, event_error_scoped, event_debug_scoped};
@@ -29,9 +29,7 @@ pub enum AppError {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let result = real_main().await;
-
-    if let Err(err) = result {
+    if let Err(err) = real_main().await {
         event_error_scoped!("AppError", "Fatal error: {:?}", err).await;
         save_journal().await;
         exit(1);
@@ -45,43 +43,35 @@ async fn real_main() -> Result<(), AppError> {
     let verbose = args.verbose;
     let command_opt = args.command.clone();
 
-    // --- Initialize Eventline runtime ---
     let is_client = command_opt.is_some();
 
+    // --- Only initialize logging for daemon ---
     if !is_client {
         runtime::init().await;
         runtime::enable_console_output(true);
         runtime::enable_console_color(true);
+
         if verbose {
             set_log_level(LogLevel::Debug);
         } else {
             set_log_level(LogLevel::Info);
         }
 
-        init_logging(verbose).await;
+        // Pass `daemon=true` so init_logging does not print anything for clients
+        utils::init_logging(verbose).await;
+
         let log_path = utils::get_log_path();
-        crate::utils::mark_new_run(&log_path, "Stasis start");
+        utils::mark_new_run(&log_path, "Stasis start"); // Only once per daemon start
     }
 
-
-    // --- Initialize logging and mark new run ---
-    init_logging(verbose).await;
-    let log_path = utils::get_log_path();
-    crate::utils::mark_new_run(&log_path, "Stasis start");
-  
     // --- Handle client commands ---
     if let Some(cmd) = command_opt {
-        //let cmd_clone = cmd.clone(); // clone for logging
-        //event_debug_scoped!("Client", "Handling client command: {:?}", cmd_clone).await;
-
         client::handle_client_command(&cmd).await.map_err(|_| {
             futures::executor::block_on(event_error_scoped!("Client", "Client command failed"));
             AppError::ClientCommandFailed
         })?;
-
         return Ok(());
     }
-
 
     // --- Ensure Wayland ---
     if var("WAYLAND_DISPLAY").is_err() {
@@ -89,7 +79,7 @@ async fn real_main() -> Result<(), AppError> {
         exit(1);
     }
 
-    // --- Single-instance enforcement and daemon startup ---
+    // --- Single-instance enforcement ---
     let help_or_version = std::env::args()
         .any(|a| matches!(a.as_str(), "-V" | "--version" | "-h" | "--help" | "help"));
 
@@ -100,7 +90,7 @@ async fn real_main() -> Result<(), AppError> {
         return Ok(());
     }
 
-    // Remove old socket if present
+    // Remove old socket
     if let Err(e) = fs::remove_file(SOCKET_PATH) {
         if e.kind() != std::io::ErrorKind::NotFound {
             event_error_scoped!("Core", "Failed to remove existing socket: {}", e).await;
@@ -108,9 +98,11 @@ async fn real_main() -> Result<(), AppError> {
         }
     }
 
-    // Bind control socket
     let listener = UnixListener::bind(SOCKET_PATH).map_err(|_| {
-        futures::executor::block_on(event_error_scoped!("Core", "Failed to bind control socket. Another instance may be running."));
+        futures::executor::block_on(event_error_scoped!(
+            "Core",
+            "Failed to bind control socket. Another instance may be running."
+        ));
         AppError::SocketBindFailed
     })?;
     event_info_scoped!("Core", "Control socket bound at {}", SOCKET_PATH).await;
@@ -132,3 +124,4 @@ async fn real_main() -> Result<(), AppError> {
 
     Ok(())
 }
+
