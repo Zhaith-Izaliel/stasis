@@ -49,18 +49,6 @@ Stasis doesn't just lock your screen after a timer—it understands context. Wat
 
 ## Roadmap
 
-### Complete
-
-- [x] **Sequential action blocks** – Action blocks run in the exact order defined in your config. Stasis maintains an internal index to track progress, making execution smarter and more reliable.  
-- [x] **Lock-centric design** – When a `lock-screen` action block is present and properly configured, Stasis tracks the PID of the command it executes to ensure the sequence stays intact.  
-- [x] **Resume-command support** – Each action block can run an optional follow-up command after completion.  
-- [x] **Event-driven, minimal polling** – Stasis now relies primarily on two internal loops that notify others to wake from deep sleep, significantly reducing CPU and memory usage at idle.  
-- [x] **CLI per-state triggers** – Trigger a **specific state**, the **current state**, or **all states**, all while respecting previously completed actions.  
-- [x] **Custom notifications** – Run notifications before any command block as well as notify on unpause! Requires `libnotify`.
-- [x] **Logind lock detection** – Optional `lock_detection_type` config for compositors using loginctl (e.g., quickshell). Uses `busctl` to query systemd-logind's LockedHint property.
-- [x] **User profiles / presets** – Save and load different complete configuration states for various scenarios (work, gaming, presentation etc.) and switch between them on-the-fly without restarting the daemon.
-
-### Planned
 - [ ] **Logging & analytics** – Historical idle data for power/performance insights.
 - [ ] **Power-saving optimizations** – CPU/GPU-aware idle handling.
 
