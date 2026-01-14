@@ -1,18 +1,17 @@
 use std::sync::Arc;
+use eventline::{event_error_scoped, event_info_scoped};
+use eventline::runtime::log_level::{set_log_level, LogLevel};
 use tokio::{
     net::UnixListener,
     sync::{Mutex, mpsc},
     time::Duration,
 };
 
-#[derive(Debug)]
-pub enum DaemonError {
-    ConfigLoadFailed,
-    WaylandSetupFailed,
-}
-
 use crate::{
-    SOCKET_PATH, config::parser::load_combined_config, core::{
+    SOCKET_PATH, 
+    config::parser::load_combined_config,
+    scopes::Scope,
+    core::{
         manager::{Manager, idle_loops::{spawn_idle_task, spawn_lock_watcher}},
         services::{
             app_inhibit::spawn_app_inhibit_task, 
@@ -26,11 +25,15 @@ use crate::{
     }, 
     ipc
 };
-use eventline::{event_error_scoped, event_info_scoped};
-use eventline::runtime::log_level::{set_log_level, LogLevel};
 
 // Global shutdown channel sender - IPC handlers can use this
 pub type ShutdownSender = mpsc::Sender<&'static str>;
+
+#[derive(Debug)]
+pub enum DaemonError {
+    ConfigLoadFailed,
+    WaylandSetupFailed,
+}
 
 /// Spawn the daemon with all its background services
 pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), DaemonError> {
@@ -38,7 +41,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     // Set log level based on verbose flag
     if verbose {
         set_log_level(LogLevel::Debug);
-        event_info_scoped!("Stasis", "Verbose mode enabled, log level set to DEBUG");
+        event_info_scoped!(Scope::Core, "Verbose mode enabled, log level set to DEBUG");
     } else {
         set_log_level(LogLevel::Info);
     }
@@ -64,7 +67,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     let dbus_manager = Arc::clone(&manager);
     tokio::spawn(async move {
         if let Err(e) = listen_for_power_events(dbus_manager).await {
-            event_error_scoped!("D-Bus", "Suspend event listener failed: {}", e);
+            event_error_scoped!(Scope::DBus, "Suspend event listener failed: {}", e);
         }
     });
 
@@ -93,7 +96,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     if cfg.monitor_media {
         // MPRIS monitor
         if let Err(e) = spawn_media_monitor_dbus(Arc::clone(&manager)).await {
-            event_error_scoped!("MPRIS", "Failed to spawn media monitor: {}", e);
+            event_error_scoped!(Scope::Media, "Failed to spawn media monitor: {}", e);
         }
 
         // Browser bridge detector
@@ -121,7 +124,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     spawn_wayland_monitor(shutdown_tx.clone()).await;
 
     // Log startup message
-    event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len());
+    event_info_scoped!(Scope::Core, "Stasis started! Idle actions loaded: {}", cfg.actions.len());
 
     // Wait for shutdown signal
     let shutdown_reason = shutdown_rx.recv().await.unwrap_or("unknown");
@@ -137,7 +140,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     // Clean up socket
     let _ = std::fs::remove_file(SOCKET_PATH);
     
-    event_info_scoped!("Stasis", "Shutdown complete, goodbye!");
+    event_info_scoped!(Scope::Core, "Shutdown complete, goodbye!");
     
     // Give final log time to complete
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -160,7 +163,7 @@ async fn setup_shutdown_handler(
             _ = sighup.recv() => "SIGHUP",
         };
 
-        event_info_scoped!("Stasis", "Received {}", signal_name);
+        event_info_scoped!(Scope::Core, "Received {}", signal_name);
         let _ = shutdown_tx.send(signal_name).await;
     });
 }
@@ -185,7 +188,7 @@ async fn spawn_wayland_monitor(
 
             // Try connecting to the Wayland socket
             if UnixStream::connect(&socket_path).await.is_err() {
-                event_info_scoped!("Stasis", "Wayland compositor is no longer responding");
+                event_info_scoped!(Scope::Core, "Wayland compositor is no longer responding");
                 let _ = shutdown_tx.send("Wayland disconnect").await;
                 break;
             }

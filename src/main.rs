@@ -7,14 +7,18 @@ pub mod ipc;
 pub mod media_bridge;
 pub mod scopes;
 pub mod utils;
+
+use cli::Args;
+use scopes::Scope;
+use utils::save_journal;
+
 use std::{env::var, fs, process::exit};
 use clap::Parser;
-use tokio::net::{UnixListener, UnixStream};
-use crate::cli::Args;
-use utils::save_journal;
 use eventline::runtime;
 use eventline::runtime::log_level::{set_log_level, LogLevel};
 use eventline::{event_info_scoped, event_warn_scoped, event_error_scoped, event_debug_scoped};
+use tokio::net::{UnixListener, UnixStream};
+
 pub const SOCKET_PATH: &str = "/tmp/stasis.sock";
 #[derive(Debug)]
 pub enum AppError {
@@ -56,14 +60,14 @@ async fn real_main() -> Result<(), AppError> {
     // --- Handle client commands ---
     if let Some(cmd) = command_opt {
         client::handle_client_command(&cmd).await.map_err(|_| {
-            event_error_scoped!("Client", "Client command failed");
+            event_error_scoped!(Scope::Client, "Client command failed");
             AppError::ClientCommandFailed
         })?;
         return Ok(());
     }
     // --- Ensure Wayland ---
     if var("WAYLAND_DISPLAY").is_err() {
-        event_warn_scoped!("Wayland", "Stasis requires Wayland to run.");
+        event_warn_scoped!(Scope::Wayland, "Stasis requires Wayland to run.");
         exit(1);
     }
     // --- Single-instance enforcement ---
@@ -71,39 +75,39 @@ async fn real_main() -> Result<(), AppError> {
         .any(|a| matches!(a.as_str(), "-V" | "--version" | "-h" | "--help" | "help"));
     if UnixStream::connect(SOCKET_PATH).await.is_ok() {
         if !help_or_version {
-            event_warn_scoped!("Core", "Another instance of Stasis is already running");
+            event_warn_scoped!(Scope::Core, "Another instance of Stasis is already running");
         }
         return Ok(());
     }
     // Remove old socket
     if let Err(e) = fs::remove_file(SOCKET_PATH) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            event_error_scoped!("Core", "Failed to remove existing socket: {}", e);
+            event_error_scoped!(Scope::Core, "Failed to remove existing socket: {}", e);
             return Err(AppError::SocketBindFailed);
         }
     }
     let listener = UnixListener::bind(SOCKET_PATH).map_err(|_| {
         event_error_scoped!(
-            "Core",
+            Scope::Core,
             "Failed to bind control socket. Another instance may be running."
         );
         AppError::SocketBindFailed
     })?;
-    event_info_scoped!("Core", "Control socket bound at {}", SOCKET_PATH);
+    event_info_scoped!(Scope::Core, "Control socket bound at {}", SOCKET_PATH);
     // --- Ensure user config ---
     if let Err(e) = config::bootstrap::ensure_user_config_exists() {
-        event_warn_scoped!("Config", "Could not initialize config: {}", e);
+        event_warn_scoped!(Scope::Config, "Could not initialize config: {}", e);
     } else {
-        event_debug_scoped!("Config", "User config initialized");
+        event_debug_scoped!(Scope::Config, "User config initialized");
     }
+
     // --- Run daemon ---
-    event_info_scoped!("Daemon", "Starting daemon...");
+    event_info_scoped!(Scope::Daemon, "Starting daemon...");
     daemon::run_daemon(listener, verbose).await.map_err(|_| {
-        event_error_scoped!("Daemon", "Daemon failed to start");
+        event_error_scoped!(Scope::Daemon, "Daemon failed to start");
         AppError::DaemonFailed
     })?;
-    event_info_scoped!("Daemon", "Daemon stopped cleanly");
-
+    event_info_scoped!(Scope::Daemon, "Daemon stopped cleanly");
 
     runtime::runtime_summary(true, None, false).await;
     Ok(())

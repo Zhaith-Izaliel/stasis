@@ -24,7 +24,7 @@ use crate::{
         tasks::TaskManager,
     },
 };
-use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped};
+use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped, scoped_eventline};
 
 #[derive(Debug)]
 pub struct Manager {
@@ -52,29 +52,32 @@ impl Manager {
             return;
         }
 
-        let instant_actions = self.state.get_active_instant_actions();
+        // Run everything inside a single inline scope (no 'static borrow escapes)
+        scoped_eventline!("Stasis", {
+            eventline::runtime::info("Triggering instant actions...").await;
 
-        event_info_scoped!("Stasis", "Triggering instant actions...");
-        for action in instant_actions {
-            run_action(self, &action).await;
-        }
-
-        // Mark instants as triggered
-        self.state.actions.instants_triggered = true;
-
-        // Update action_index: set to one past the last instant action
-        let actions = self.state.get_active_actions();
-        let mut index = 0;
-        for a in actions {
-            if a.is_instant() {
-                index += 1;
-            } else {
-                break;
+            let instant_actions = self.state.get_active_instant_actions();
+            for action in instant_actions {
+                run_action(self, &action).await;
             }
-        }
-        self.state.actions.action_index = index;
 
-        event_debug_scoped!("Stasis", "Instant actions complete, starting at index {}", index);
+            self.state.actions.instants_triggered = true;
+
+            let actions = self.state.get_active_actions();
+            let mut index = 0;
+            for a in actions {
+                if a.is_instant() {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            self.state.actions.action_index = index;
+
+            eventline::runtime::debug(
+                format!("Instant actions complete, starting at index {}", index)
+            ).await;
+        });
     }
 
     pub fn reset_instant_actions(&mut self) {

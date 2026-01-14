@@ -3,6 +3,7 @@ use rune_cfg::{RuneConfig, Value};
 
 use crate::{
     config::model::*,
+    scopes::Scope,
     core::utils::{ChassisKind, detect_chassis},
 };
 
@@ -10,10 +11,11 @@ use super::actions::collect_actions;
 use super::pattern::parse_app_pattern;
 use super::config::ConfigParseError;
 
-use eventline::{event_info_scoped, event_debug_scoped};
+use eventline::{event_info_scoped, scoped_eventline};
+use eventline::runtime::debug;
 
 /// Parses the base stasis configuration from a RuneConfig
-pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, ConfigParseError> {
+pub async fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, ConfigParseError> {
     let pre_suspend_command = config
         .get::<String>("stasis.pre_suspend_command")
         .or_else(|_| config.get::<String>("stasis.pre-suspend-command"))
@@ -154,7 +156,7 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
         &lock_detection_type,
         &inhibit_apps,
         &actions,
-    );
+    ).await;
 
     let mut actions = actions;
     actions.sort_by_key(|a| a.timeout != 0);
@@ -187,7 +189,7 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
     })
 }
 
-fn log_config_debug(
+async fn log_config_debug(
     pre_suspend_command: &Option<String>,
     monitor_media: bool,
     ignore_remote_media: bool,
@@ -211,27 +213,28 @@ fn log_config_debug(
     let lock_detection_type = lock_detection_type.clone();
     let inhibit_apps: Vec<AppInhibitPattern> = inhibit_apps.to_vec();
     let actions: Vec<IdleActionBlock> = actions.to_vec();
+  
 
-    tokio::spawn(async move {
-        event_debug_scoped!("Config", "Parsed Config:");
-        event_debug_scoped!("Config", "  pre_suspend_command = {:?}", pre_suspend_command);
-        event_debug_scoped!("Config", "  monitor_media = {:?}", monitor_media);
-        event_debug_scoped!("Config", "  ignore_remote_media = {:?}", ignore_remote_media);
-        event_debug_scoped!("Config", "  media_blacklist = {:?}", media_blacklist);
-        event_debug_scoped!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors);
-        event_debug_scoped!("Config", "  notify_on_unpause = {:?}", notify_on_unpause);
-        event_debug_scoped!("Config", "  notify_before_action = {:?}", notify_before_action);
-        event_debug_scoped!("Config", "  notify_seconds_before = {:?}", notify_seconds_before);
-        event_debug_scoped!("Config", "  debounce_seconds = {:?}", debounce_seconds);
-        event_debug_scoped!("Config", "  lid_close_action = {:?}", lid_close_action);
-        event_debug_scoped!("Config", "  lid_open_action = {:?}", lid_open_action);
-        event_debug_scoped!("Config", "  lock_detection_type = {:?}", lock_detection_type);
-        event_debug_scoped!("Config", "  inhibit_apps = {:?}", inhibit_apps);
-        event_debug_scoped!("Stasis", "  actions:");
+    scoped_eventline!(Scope::Config, {
+        debug("Parsed Config:").await;
+        debug(&format!("  pre_suspend_command = {:?}", pre_suspend_command)).await;
+        debug(&format!("  monitor_media = {:?}", monitor_media)).await;
+        debug(&format!("  ignore_remote_media = {:?}", ignore_remote_media)).await;
+        debug(&format!("  media_blacklist = {:?}", media_blacklist)).await;
+        debug(&format!("  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors)).await;
+        debug(&format!("  notify_on_unpause = {:?}", notify_on_unpause)).await;
+        debug(&format!("  notify_before_action = {:?}", notify_before_action)).await;
+        debug(&format!("  notify_seconds_before = {:?}", notify_seconds_before)).await;
+        debug(&format!("  debounce_seconds = {:?}", debounce_seconds)).await;
+        debug(&format!("  lid_close_action = {:?}", lid_close_action)).await;
+        debug(&format!("  lid_open_action = {:?}", lid_open_action)).await;
+        debug(&format!("  lock_detection_type = {:?}", lock_detection_type)).await;
+        debug(&format!("  inhibit_apps = {:?}", inhibit_apps)).await;
+        debug("Actions:").await;
 
         for action in actions {
             let mut details = format!(
-                "    {}: timeout={}s, command=\"{}\"",
+                "  {}: timeout={}s, command=\"{}\"",
                 action.name, action.timeout, action.command
             );
             if let Some(lock_cmd) = &action.lock_command {
@@ -247,8 +250,9 @@ fn log_config_debug(
                 }
             }
 
-            event_debug_scoped!("Stasis", "{}", details);
+            debug(&details).await;
         }
     });
 }
+
 
