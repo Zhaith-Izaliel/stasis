@@ -88,7 +88,6 @@ async fn handle_connection(
     }
     // Normal IPC command, wrap in scope and log
     let cmd_for_log = cmd_owned.clone(); // CLONE it for logging
-    eventline::event_scope_async!("IPC Command", {
         let manager_for_macro = Arc::clone(&manager_owned);
         let mut stream_for_macro = stream;
         event_debug_scoped!(
@@ -99,7 +98,5 @@ async fn handle_connection(
         let response = router::route_command(&cmd_owned, manager_for_macro, shutdown_tx).await;
         let _ = stream_for_macro.write_all(response.as_bytes()).await;
         let _ = stream_for_macro.flush().await;
-    })
-    .await;
     Ok(())
 }

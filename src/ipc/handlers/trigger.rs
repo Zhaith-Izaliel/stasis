@@ -7,7 +7,7 @@ use crate::core::manager::{
     helpers::{advance_past_lock, trigger_all_idle_actions, trigger_pre_suspend},
     processes::run_command_detached,
 };
-use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped, runtime};
+use eventline::{event_info_scoped, event_debug_scoped, event_error_scoped, scoped_eventline};
 
 /// Handles the "trigger" command - triggers actions by name
 pub async fn handle_trigger(
@@ -16,7 +16,7 @@ pub async fn handle_trigger(
 ) -> String {
     let action_owned = action.to_owned();
 
-    runtime::scoped_async(Some("TriggerCommand"), || async move {
+    scoped_eventline!("TriggerCommand", {
         if action_owned.is_empty() {
             event_error_scoped!("TriggerCommand", "Trigger command missing action name");
             return "ERROR: No action name provided".to_string();
@@ -31,17 +31,15 @@ pub async fn handle_trigger(
             Err(e) => format!("ERROR: {}", e),
         }
     })
-    .await
 }
 
 async fn trigger_all(manager: Arc<Mutex<Manager>>) -> String {
-    runtime::scoped_async(Some("TriggerAll"), || async move {
+    scoped_eventline!("TriggerAll", {
         let mut mgr = manager.lock().await;
         trigger_all_idle_actions(&mut mgr).await;
         event_debug_scoped!("TriggerAll", "Triggered all idle actions");
         "All idle actions triggered".to_string()
     })
-    .await
 }
 
 /// Helper to remove `ac.` or `battery.` prefixes
@@ -58,7 +56,7 @@ pub async fn trigger_action_by_name(
 ) -> Result<String, String> {
     let name_owned = name.to_owned();
 
-    runtime::scoped_async(Some("TriggerAction"), || async move {
+    scoped_eventline!("TriggerAction", {
         let normalized = name_owned.replace('_', "-").to_lowercase();
         let mut mgr = manager.lock().await;
 
@@ -76,7 +74,6 @@ pub async fn trigger_action_by_name(
             (None, normalized.as_str())
         };
 
-        // Select the appropriate block for searching (immutable borrow)
         let block = if let Some(explicit_block) = target_block {
             match explicit_block {
                 "ac" => &mgr.state.power.ac_actions,
@@ -126,7 +123,7 @@ pub async fn trigger_action_by_name(
             }
         };
 
-        // Clone name for logging separately to avoid moving original
+        // Logging
         let action_name_for_log = action.name.clone();
         event_info_scoped!(
             "TriggerAction",
@@ -159,21 +156,18 @@ pub async fn trigger_action_by_name(
                     mgr.state.timing.last_activity = now;
                     mgr.state.debounce.main_debounce = Some(now + debounce);
 
-                    // Reset last_triggered safely, one mutable borrow at a time
-                    {
-                        let power = &mut mgr.state.power;
-                        for a in &mut power.default_actions {
-                            a.last_triggered = None;
-                        }
-                        for a in &mut power.ac_actions {
-                            a.last_triggered = None;
-                        }
-                        for a in &mut power.battery_actions {
-                            a.last_triggered = None;
-                        }
+                    // Reset last_triggered safely
+                    for a in &mut mgr.state.power.default_actions {
+                        a.last_triggered = None;
+                    }
+                    for a in &mut mgr.state.power.ac_actions {
+                        a.last_triggered = None;
+                    }
+                    for a in &mut mgr.state.power.battery_actions {
+                        a.last_triggered = None;
                     }
 
-                    // Determine active block and borrow only once
+                    // Determine active block
                     let active_block = if !mgr.state.power.ac_actions.is_empty() || !mgr.state.power.battery_actions.is_empty() {
                         match mgr.state.on_battery() {
                             Some(true) => "battery",
@@ -207,16 +201,13 @@ pub async fn trigger_action_by_name(
                     }
 
                     mgr.state.actions.action_index = next_index;
+                    mgr.state.notify.notify_one();
                 }
-
-                mgr.state.notify.notify_one();
             }
         } else {
             run_action(&mut mgr, &action).await;
         }
 
-        // Return value uses original `action.name`, safe to borrow now
         Ok(strip_action_prefix(&action.name).to_string())
     })
-    .await
 }

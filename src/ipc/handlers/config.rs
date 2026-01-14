@@ -6,7 +6,7 @@ use crate::{
 };
 use super::state_info::{collect_full_state, format_text_response};
 use eventline::{
-    event_debug_scoped, event_warn_scoped, event_error_scoped, event_info_scoped, event_scope_async,
+    event_debug_scoped, event_error_scoped, event_info_scoped, event_warn_scoped, scoped_eventline
 };
 
 /// Handles the "reload" command - reloads configuration from disk
@@ -29,7 +29,7 @@ async fn reload_config_internal(
     manager: Arc<tokio::sync::Mutex<Manager>>,
     combined: CombinedConfig,
 ) -> String {
-    event_scope_async!("Config Reload", {
+    scoped_eventline!("Config Reload", {
         // Determine if media monitoring should be cleaned up
         let should_cleanup = {
             let mgr = manager.lock().await;
@@ -100,7 +100,7 @@ async fn reload_config_internal(
 
         let info_output = format_text_response(&state_info, InfoSections::default());
         format!("Config reloaded successfully\n{}\n\n{}", profile_status, info_output)
-    }).await
+    })
 }
 
 async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
