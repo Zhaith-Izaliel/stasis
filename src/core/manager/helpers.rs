@@ -37,22 +37,22 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     };
 
     if actions_to_trigger.is_empty() {
-        event_info_scoped!("Stasis", "No actions defined to trigger").await;
+        event_info_scoped!("Stasis", "No actions defined to trigger");
         return;
     }
 
-    event_info_scoped!("Stasis", "Triggering all idle actions for '{}'", block_name).await;
+    event_info_scoped!("Stasis", "Triggering all idle actions for '{}'", block_name);
 
     for action in actions_to_trigger {
         // Skip lockscreen if already locked
         if matches!(action.kind, IdleAction::LockScreen) && mgr.state.lock.is_locked {
-            event_debug_scoped!("Stasis", "Skipping lock action: already locked").await;
+            event_debug_scoped!("Stasis", "Skipping lock action: already locked");
             continue;
         }
 
         // Clone name for logging
         let action_name_for_log = action.name.clone();
-        event_info_scoped!("Stasis", "Triggering idle action '{}'", action_name_for_log).await;
+        event_info_scoped!("Stasis", "Triggering idle action '{}'", action_name_for_log);
 
         run_action(mgr, &action).await;
     }
@@ -71,7 +71,7 @@ pub async fn trigger_all_idle_actions(mgr: &mut Manager) {
     }
 
     mgr.state.actions.action_index = actions_mut.len().saturating_sub(1);
-    event_info_scoped!("Stasis", "All idle actions triggered").await;
+    event_info_scoped!("Stasis", "All idle actions triggered");
 }
 
 pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
@@ -87,17 +87,17 @@ pub async fn set_manually_paused(mgr: &mut Manager, inhibit: bool) {
 pub async fn trigger_pre_suspend(mgr: &mut Manager) {
     if let Some(cmd) = &mgr.state.pre_suspend_command {
         let cmd_owned = cmd.clone();
-        event_info_scoped!("Stasis", "Running pre-suspend command: {}", cmd_owned).await;
+        event_info_scoped!("Stasis", "Running pre-suspend command: {}", cmd_owned);
 
         match run_command_silent(cmd).await {
-            Ok(_) => event_info_scoped!("Stasis", "Pre-suspend command finished").await,
-            Err(e) => event_error_scoped!("Stasis", "Pre-suspend command failed: {}", e).await,
+            Ok(_) => event_info_scoped!("Stasis", "Pre-suspend command finished"),
+            Err(e) => event_error_scoped!("Stasis", "Pre-suspend command failed: {}", e),
         }
     }
 }
 
 pub async fn advance_past_lock(mgr: &mut Manager) {
-    event_debug_scoped!("Stasis", "Advancing state past lock stage...").await;
+    event_debug_scoped!("Stasis", "Advancing state past lock stage...");
 
     let now = Instant::now();
     mgr.state.lock.post_advanced = true;
@@ -152,12 +152,12 @@ pub async fn advance_past_lock(mgr: &mut Manager) {
                 next_index,
                 action_name_for_log,
                 timeout
-            ).await;
+            );
         } else {
-            event_debug_scoped!("Stasis", "Advanced past all actions (at end of sequence)").await;
+            event_debug_scoped!("Stasis", "Advanced past all actions (at end of sequence)");
         }
     } else {
-        event_debug_scoped!("Stasis", "No lock action found in active block").await;
+        event_debug_scoped!("Stasis", "No lock action found in active block");
     }
 }
 

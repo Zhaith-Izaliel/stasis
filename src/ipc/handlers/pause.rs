@@ -209,7 +209,7 @@ async fn pause_for_duration(
 
     // Clone reason for logging before passing to macro
     let reason_for_log = reason.clone();
-    event_info_scoped!("Stasis", "Idle manager paused {}", reason_for_log).await;
+    event_info_scoped!("Stasis", "Idle manager paused {}", reason_for_log);
 
     // Clone again for the async task
     let reason_for_task = reason.clone();
@@ -234,7 +234,7 @@ async fn pause_for_duration(
 
                 // Fresh clone for macro
                 let reason_clone = reason_for_task.clone();
-                event_info_scoped!("Stasis", "Auto-resuming after {}", reason_clone).await;
+                event_info_scoped!("Stasis", "Auto-resuming after {}", reason_clone);
 
                 if should_notify {
                     send_notification("Stasis resumed", &notification_for_task).await;
@@ -247,7 +247,7 @@ async fn pause_for_duration(
                     "Auto-resume timer expired after {} but {} inhibitor(s) still active",
                     reason_clone,
                     active_inhibitors
-                ).await;
+                );
 
                 if should_notify {
                     let inhibitor_word = if active_inhibitors == 1 { "inhibitor" } else { "inhibitors" };
@@ -337,7 +337,7 @@ async fn send_notification(summary: &str, body: &str) {
         .arg(body)
         .spawn()
     {
-        event_error_scoped!("Stasis", "Failed to send notification: {}", e).await;
+        event_error_scoped!("Stasis", "Failed to send notification: {}", e);
     }
 }
 

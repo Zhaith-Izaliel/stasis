@@ -164,9 +164,9 @@ pub fn parse_base_stasis_config(config: &RuneConfig) -> Result<StasisConfig, Con
         let action_names: Vec<String> = actions.iter().map(|a| a.name.clone()).collect();
         // Clone string for 'static safety
         let action_names_str = action_names.join(", ");
-        tokio::spawn(event_info_scoped!("Stasis", "Config loaded with actions: [{}]", action_names_str));
+        event_info_scoped!("Stasis", "Config loaded with actions: [{}]", action_names_str);
     } else {
-        tokio::spawn(event_info_scoped!("Stasis", "Config loaded with no actions."));
+        event_info_scoped!("Stasis", "Config loaded with no actions.");
     }
 
     Ok(StasisConfig {
@@ -213,21 +213,21 @@ fn log_config_debug(
     let actions: Vec<IdleActionBlock> = actions.to_vec();
 
     tokio::spawn(async move {
-        event_debug_scoped!("Config", "Parsed Config:").await;
-        event_debug_scoped!("Config", "  pre_suspend_command = {:?}", pre_suspend_command).await;
-        event_debug_scoped!("Config", "  monitor_media = {:?}", monitor_media).await;
-        event_debug_scoped!("Config", "  ignore_remote_media = {:?}", ignore_remote_media).await;
-        event_debug_scoped!("Config", "  media_blacklist = {:?}", media_blacklist).await;
-        event_debug_scoped!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors).await;
-        event_debug_scoped!("Config", "  notify_on_unpause = {:?}", notify_on_unpause).await;
-        event_debug_scoped!("Config", "  notify_before_action = {:?}", notify_before_action).await;
-        event_debug_scoped!("Config", "  notify_seconds_before = {:?}", notify_seconds_before).await;
-        event_debug_scoped!("Config", "  debounce_seconds = {:?}", debounce_seconds).await;
-        event_debug_scoped!("Config", "  lid_close_action = {:?}", lid_close_action).await;
-        event_debug_scoped!("Config", "  lid_open_action = {:?}", lid_open_action).await;
-        event_debug_scoped!("Config", "  lock_detection_type = {:?}", lock_detection_type).await;
-        event_debug_scoped!("Config", "  inhibit_apps = {:?}", inhibit_apps).await;
-        event_debug_scoped!("Stasis", "  actions:").await;
+        event_debug_scoped!("Config", "Parsed Config:");
+        event_debug_scoped!("Config", "  pre_suspend_command = {:?}", pre_suspend_command);
+        event_debug_scoped!("Config", "  monitor_media = {:?}", monitor_media);
+        event_debug_scoped!("Config", "  ignore_remote_media = {:?}", ignore_remote_media);
+        event_debug_scoped!("Config", "  media_blacklist = {:?}", media_blacklist);
+        event_debug_scoped!("Config", "  respect_wayland_inhibitors = {:?}", respect_wayland_inhibitors);
+        event_debug_scoped!("Config", "  notify_on_unpause = {:?}", notify_on_unpause);
+        event_debug_scoped!("Config", "  notify_before_action = {:?}", notify_before_action);
+        event_debug_scoped!("Config", "  notify_seconds_before = {:?}", notify_seconds_before);
+        event_debug_scoped!("Config", "  debounce_seconds = {:?}", debounce_seconds);
+        event_debug_scoped!("Config", "  lid_close_action = {:?}", lid_close_action);
+        event_debug_scoped!("Config", "  lid_open_action = {:?}", lid_open_action);
+        event_debug_scoped!("Config", "  lock_detection_type = {:?}", lock_detection_type);
+        event_debug_scoped!("Config", "  inhibit_apps = {:?}", inhibit_apps);
+        event_debug_scoped!("Stasis", "  actions:");
 
         for action in actions {
             let mut details = format!(
@@ -247,7 +247,7 @@ fn log_config_debug(
                 }
             }
 
-            event_debug_scoped!("Stasis", "{}", details).await;
+            event_debug_scoped!("Stasis", "{}", details);
         }
     });
 }

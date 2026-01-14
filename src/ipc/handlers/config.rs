@@ -19,7 +19,7 @@ pub async fn handle_reload(
             // Build a temporary owned string for the logger (logger may take ownership).
             // Then build the return string separately using `e` again.
             let log_str = format!("Failed to reload config: {}", e);
-            event_error_scoped!("Config", "{}", log_str).await;
+            event_error_scoped!("Config", "{}", log_str);
             format!("ERROR: Failed to reload config: {}", e)
         }
     }
@@ -62,7 +62,7 @@ async fn reload_config_internal(
                             "Config Reload",
                             "Profile '{}' no longer exists, falling back to base config",
                             profile_name_clone
-                        ).await;
+                        );
                         (
                             combined.base.clone(),
                             format!("Profile '{}' removed, switched to base config", profile_name)
@@ -96,7 +96,7 @@ async fn reload_config_internal(
 
         // Log debug without moving the original profile_status
         let profile_status_clone = profile_status.clone();
-        event_debug_scoped!("Config Reload", "Config reloaded successfully: {}", profile_status_clone).await;
+        event_debug_scoped!("Config Reload", "Config reloaded successfully: {}", profile_status_clone);
 
         let info_output = format_text_response(&state_info, InfoSections::default());
         format!("Config reloaded successfully\n{}\n\n{}", profile_status, info_output)
@@ -109,14 +109,14 @@ async fn cleanup_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
 }
 
 async fn restart_media_monitoring(manager: Arc<tokio::sync::Mutex<Manager>>) {
-    event_info_scoped!("Config Reload", "Restarting media monitoring after config reload...").await;
+    event_info_scoped!("Config Reload", "Restarting media monitoring after config reload...");
 
     if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
         Arc::clone(&manager)
     ).await {
         // Build a temporary owned string for the logger; we don't need it after the log.
         let log_str = format!("Failed to restart media monitor: {}", e);
-        event_error_scoped!("Config Reload", "{}", log_str).await;
+        event_error_scoped!("Config Reload", "{}", log_str);
     }
 
     tokio::time::sleep(Duration::from_millis(100)).await;

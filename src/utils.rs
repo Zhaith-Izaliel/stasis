@@ -72,7 +72,7 @@ pub async fn init_logging(verbose: bool) {
         set_log_level(LogLevel::Info);
     }
 
-    event_info!("Stasis starting...").await;
+    event_info!("Stasis starting...");
 }
 
 /// Flush journal to disk (full Eventline-style)

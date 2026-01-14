@@ -32,14 +32,14 @@ pub async fn incr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
                 "Inhibitor registered (count: {} → {}): first inhibitor active → idle timers paused",
                 prev,
                 now
-            ).await;
+            );
         } else {
             event_debug_scoped!(
                 "Inhibitors",
                 "Inhibitor registered (count: {} → {}): manual pause already active",
                 prev,
                 now
-            ).await;
+            );
         }
     } else {
         event_debug_scoped!(
@@ -47,7 +47,7 @@ pub async fn incr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
             "Inhibitor registered (count: {} → {})",
             prev,
             now
-        ).await;
+        );
     }
 
     // Wake idle task to recalc next timeout
@@ -66,7 +66,7 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
             "Inhibitors",
             "decr_active_inhibitor called for {:?} but count already 0 (possible mismatch)",
             source
-        ).await;
+        );
         return;
     }
 
@@ -86,14 +86,14 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
                 "Inhibitor removed (count: {} → {}): no more inhibitors → idle timers resumed",
                 prev,
                 now
-            ).await;
+            );
         } else {
             event_debug_scoped!(
                 "Inhibitors",
                 "Inhibitor removed (count: {} → {}): manual pause still active, timers remain paused",
                 prev,
                 now
-            ).await;
+            );
         }
 
         mgr.state.notify.notify_one();
@@ -103,7 +103,7 @@ pub async fn decr_active_inhibitor(mgr: &mut Manager, source: InhibitorSource) {
             "Inhibitor removed (count: {} → {})",
             prev,
             now
-        ).await;
+        );
     }
 }
 

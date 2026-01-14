@@ -39,8 +39,7 @@ pub async fn spawn_ipc_socket_with_listener(
                                     "IPC Connection",
                                     "Error handling IPC connection: {}",
                                     err_owned
-                                )
-                                .await;
+                                );
                             }
                         })
                         .await;
@@ -48,8 +47,7 @@ pub async fn spawn_ipc_socket_with_listener(
                             event_error_scoped!(
                                 "IPC Connection",
                                 "IPC connection timed out after 10 seconds"
-                            )
-                            .await;
+                            );
                         }
                     });
                 }
@@ -59,8 +57,7 @@ pub async fn spawn_ipc_socket_with_listener(
                         Scope::Ipc.to_string(),
                         "Failed to accept IPC connection: {}",
                         e_owned
-                    )
-                    .await;
+                    );
                 }
             }
         }
@@ -98,8 +95,7 @@ async fn handle_connection(
             "IPC Command",
             "Received IPC command: {}",
             cmd_for_log
-        )
-        .await;
+        );
         let response = router::route_command(&cmd_owned, manager_for_macro, shutdown_tx).await;
         let _ = stream_for_macro.write_all(response.as_bytes()).await;
         let _ = stream_for_macro.flush().await;

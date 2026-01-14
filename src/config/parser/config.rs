@@ -58,7 +58,7 @@ pub async fn load_merged_config() -> Result<RuneConfig, ConfigParseError> {
         if user_path.exists() {
             config = RuneConfig::from_file(&user_path)
                 .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load user config from {}: {}", user_path.display(), e)))?;
-            event_debug_scoped!("Stasis", "Loaded config from: {}", user_path.display()).await;
+            event_debug_scoped!("Stasis", "Loaded config from: {}", user_path.display());
             return Ok(config);
         }
     }
@@ -66,18 +66,18 @@ pub async fn load_merged_config() -> Result<RuneConfig, ConfigParseError> {
     if system_path.exists() {
         config = RuneConfig::from_file(&system_path)
             .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load system config from {}: {}", system_path.display(), e)))?;
-        event_debug_scoped!("Stasis", "Loaded config from: {}", system_path.display()).await; 
+        event_debug_scoped!("Stasis", "Loaded config from: {}", system_path.display()); 
         return Ok(config);
     }
     
     if share_path.exists() {
         config = RuneConfig::from_file(&share_path)
             .map_err(|e| ConfigParseError::RuneConfig(format!("failed to load shared example config from {}: {}", share_path.display(), e)))?;
-        event_debug_scoped!("Stasis", "Loaded config from: {}", share_path.display()).await;
+        event_debug_scoped!("Stasis", "Loaded config from: {}", share_path.display());
         return Ok(config);
     }
     
-    event_debug_scoped!("Stasis", "Using internal default configuration").await;
+    event_debug_scoped!("Stasis", "Using internal default configuration");
     Ok(config)
 }
 
@@ -96,7 +96,7 @@ pub async fn load_combined_config() -> Result<CombinedConfig, ConfigParseError> 
     // Collect names as owned Strings to avoid borrowing `profiles` while moving it
     if !profiles.is_empty() {
         let profile_names: Vec<String> = profiles.iter().map(|p| p.name.clone()).collect();
-        event_info_scoped!("Stasis", "Profiles loaded: {}", profile_names.join(", ")).await;
+        event_info_scoped!("Stasis", "Profiles loaded: {}", profile_names.join(", "));
     }
     
     Ok(CombinedConfig {

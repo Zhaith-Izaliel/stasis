@@ -38,7 +38,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     // Set log level based on verbose flag
     if verbose {
         set_log_level(LogLevel::Debug);
-        event_info_scoped!("Stasis", "Verbose mode enabled, log level set to DEBUG").await;
+        event_info_scoped!("Stasis", "Verbose mode enabled, log level set to DEBUG");
     } else {
         set_log_level(LogLevel::Info);
     }
@@ -64,7 +64,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     let dbus_manager = Arc::clone(&manager);
     tokio::spawn(async move {
         if let Err(e) = listen_for_power_events(dbus_manager).await {
-            tokio::spawn(event_error_scoped!("D-Bus", "Suspend event listener failed: {}", e));
+            event_error_scoped!("D-Bus", "Suspend event listener failed: {}", e);
         }
     });
 
@@ -93,7 +93,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     if cfg.monitor_media {
         // MPRIS monitor
         if let Err(e) = spawn_media_monitor_dbus(Arc::clone(&manager)).await {
-            tokio::spawn(event_error_scoped!("MPRIS", "Failed to spawn media monitor: {}", e));
+            event_error_scoped!("MPRIS", "Failed to spawn media monitor: {}", e);
         }
 
         // Browser bridge detector
@@ -121,12 +121,12 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     spawn_wayland_monitor(shutdown_tx.clone()).await;
 
     // Log startup message
-    event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len()).await;
+    event_info_scoped!("Stasis", "Stasis started! Idle actions loaded: {}", cfg.actions.len());
 
     // Wait for shutdown signal
     let shutdown_reason = shutdown_rx.recv().await.unwrap_or("unknown");
     
-    event_info_scoped!("Stasis", "Shutdown initiated: {}", shutdown_reason).await;
+    event_info_scoped!("Stasis", "Shutdown initiated: {}", shutdown_reason);
     
     // Perform cleanup
     manager.lock().await.shutdown().await;
@@ -137,7 +137,7 @@ pub async fn run_daemon(listener: UnixListener, verbose: bool) -> Result<(), Dae
     // Clean up socket
     let _ = std::fs::remove_file(SOCKET_PATH);
     
-    event_info_scoped!("Stasis", "Shutdown complete, goodbye!").await;
+    event_info_scoped!("Stasis", "Shutdown complete, goodbye!");
     
     // Give final log time to complete
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -160,7 +160,7 @@ async fn setup_shutdown_handler(
             _ = sighup.recv() => "SIGHUP",
         };
 
-        event_info_scoped!("Stasis", "Received {}", signal_name).await;
+        event_info_scoped!("Stasis", "Received {}", signal_name);
         let _ = shutdown_tx.send(signal_name).await;
     });
 }
@@ -185,7 +185,7 @@ async fn spawn_wayland_monitor(
 
             // Try connecting to the Wayland socket
             if UnixStream::connect(&socket_path).await.is_err() {
-                event_info_scoped!("Stasis", "Wayland compositor is no longer responding").await;
+                event_info_scoped!("Stasis", "Wayland compositor is no longer responding");
                 let _ = shutdown_tx.send("Wayland disconnect").await;
                 break;
             }

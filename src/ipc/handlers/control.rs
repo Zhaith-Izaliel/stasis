@@ -12,7 +12,7 @@ pub async fn handle_stop(
     _manager: Arc<tokio::sync::Mutex<Manager>>,
     shutdown_tx: ShutdownSender,
 ) -> String {
-    event_info_scoped!("Control Stop", "Received stop command").await;
+    event_info_scoped!("Control Stop", "Received stop command");
     
     // Send shutdown signal
     let _ = shutdown_tx.send("IPC stop").await;
@@ -27,10 +27,10 @@ pub async fn handle_toggle_inhibit(manager: Arc<tokio::sync::Mutex<Manager>>) ->
     
     if currently_inhibited {
         set_manually_paused(&mut mgr, false).await;
-        event_debug_scoped!("Control ToggleInhibit", "Manual inhibit disabled (toggle)").await;
+        event_debug_scoped!("Control ToggleInhibit", "Manual inhibit disabled (toggle)");
     } else {
         set_manually_paused(&mut mgr, true).await;
-        event_debug_scoped!("Control ToggleInhibit", "Manual inhibit enabled (toggle)").await;
+        event_debug_scoped!("Control ToggleInhibit", "Manual inhibit enabled (toggle)");
     }
     
     let response = if currently_inhibited {

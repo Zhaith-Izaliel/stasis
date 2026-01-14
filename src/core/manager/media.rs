@@ -47,20 +47,20 @@ impl Manager {
         };
 
         if should_monitor {
-            event_debug_scoped!("MPRIS", "Restarting media monitor...").await;
+            event_debug_scoped!("MPRIS", "Restarting media monitor...");
             if let Err(e) = crate::core::services::media::spawn_media_monitor_dbus(
                 Arc::clone(&manager_arc),
             )
             .await
             {
-                event_error_scoped!("Stasis", "Failed to restart media monitor: {}", e).await;
+                event_error_scoped!("Stasis", "Failed to restart media monitor: {}", e);
             }
         }
     }
 
     /// Clean up all media monitoring state and inhibitors
     pub async fn cleanup_media_monitoring(&mut self) {
-        event_info_scoped!("Stasis", "Cleaning up media monitoring state").await;
+        event_info_scoped!("Stasis", "Cleaning up media monitoring state");
 
         // Clear standard media inhibitor
         if self.state.media.media_playing {

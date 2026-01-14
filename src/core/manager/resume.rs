@@ -17,7 +17,7 @@ impl Manager {
             "Stasis",
             "Firing {} pre-lock resume command(s) on unlock...",
             queue_len
-        ).await;
+        );
 
         for action in self.state.actions.pre_lock_resume_queue.drain(..) {
             if let Some(resume_cmd) = &action.resume_command {
@@ -28,7 +28,7 @@ impl Manager {
                     "Stasis",
                     "Running pre-lock resume command for action: {}",
                     action_name_for_log
-                ).await;
+                );
 
                 if let Err(e) = run_command_detached(&cmd_clone).await {
                     let _action_name_for_err = action.name.clone();
@@ -37,7 +37,7 @@ impl Manager {
                         "Failed to run resume command '{}': {}",
                         cmd_clone,
                         e
-                    ).await;
+                    );
                 }
             }
         }
@@ -56,7 +56,7 @@ impl Manager {
             "Stasis",
             "Firing {} post-lock resume command(s) while locked...",
             queue_len
-        ).await;
+        );
 
         let actions_to_fire: Vec<_> = self.state.actions.post_lock_resume_queue.drain(..).collect();
         for action in actions_to_fire.into_iter().rev() {
@@ -69,7 +69,7 @@ impl Manager {
                     "Stasis",
                     "Running resume command for action: {}",
                     action_name_for_log
-                ).await;
+                );
 
                 if let Err(e) = run_command_detached(&cmd_clone).await {
                     event_debug_scoped!(
@@ -77,7 +77,7 @@ impl Manager {
                         "Failed to run resume command '{}': {}",
                         cmd_clone,
                         e
-                    ).await;
+                    );
                 }
 
                 // If this was a DPMS action, remove it from pre-lock queue
@@ -91,7 +91,7 @@ impl Manager {
                         "Stasis",
                         "DPMS resume fired post-lock, removed from pre-lock queue: {}",
                         action_name_for_log2
-                    ).await;
+                    );
                 }
             }
         }
@@ -129,7 +129,7 @@ impl Manager {
             "Stasis",
             "Firing {} total resume command(s)...",
             actual_count
-        ).await;
+        );
 
         // Fire post-lock commands first
         let mut fired_dpms_names: Vec<String> = Vec::new();
@@ -144,7 +144,7 @@ impl Manager {
                     "Stasis",
                     "Running post-lock resume command for action: {}",
                     action_name_for_log
-                ).await;
+                );
 
                 if let Err(e) = run_command_detached(&cmd_clone).await {
                     event_debug_scoped!(
@@ -152,7 +152,7 @@ impl Manager {
                         "Failed to run resume command '{}': {}",
                         cmd_clone,
                         e
-                    ).await;
+                    );
                 }
 
                 if matches!(action.kind, IdleAction::Dpms) {
@@ -171,7 +171,7 @@ impl Manager {
                     "Stasis",
                     "Skipping duplicate DPMS resume for: {}",
                     action_name_for_log
-                ).await;
+                );
                 continue;
             }
 
@@ -183,7 +183,7 @@ impl Manager {
                     "Stasis",
                     "Running pre-lock resume command for action: {}",
                     action_name_for_log2
-                ).await;
+                );
 
                 if let Err(e) = run_command_detached(&cmd_clone).await {
                     event_debug_scoped!(
@@ -191,7 +191,7 @@ impl Manager {
                         "Failed to run resume command '{}': {}",
                         cmd_clone,
                         e
-                    ).await;
+                    );
                 }
             }
         }

@@ -87,13 +87,11 @@ pub async fn route_command(
                         .await
                         .map_err(|e| {
                             let e_for_log = e.clone();
-                            tokio::spawn(
                                 event_error_scoped!(
                                     "List",
                                     "List command failed: {}",
                                     e_for_log
-                                )
-                            );
+                                );
                             e
                         })
                 })
@@ -172,8 +170,7 @@ pub async fn route_command(
                     "Router",
                     "Unknown IPC command: {}",
                     cmd_for_log
-                )
-                .await;
+                );
                 Err(format!("ERROR: Unknown command '{}'", cmd_owned))
             }
         };

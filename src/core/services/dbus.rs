@@ -18,23 +18,23 @@ pub async fn listen_for_suspend_events(idle_manager: Arc<Mutex<Manager>>) -> Zbu
     ).await?;
     
     let mut stream = proxy.receive_signal("PrepareForSleep").await?;
-    event_info_scoped!("D-Bus", "Listening for system suspend events").await;
+    event_info_scoped!("D-Bus", "Listening for system suspend events");
 
     while let Some(signal) = stream.next().await {
         let going_to_sleep: bool = match signal.body().deserialize() {
             Ok(val) => val,
             Err(e) => {
-                event_warn_scoped!("D-Bus", "Failed to parse suspend signal: {e:?}").await;
+                event_warn_scoped!("D-Bus", "Failed to parse suspend signal: {e:?}");
                 continue;
             }
         };
 
         let mgr = Arc::clone(&idle_manager);
         if going_to_sleep {
-            event_info_scoped!("Power", "System preparing to suspend").await;
+            event_info_scoped!("Power", "System preparing to suspend");
             handle_event(&mgr, Event::Suspend).await;
         } else {
-            event_info_scoped!("Power", "System woke from suspend").await;
+            event_info_scoped!("Power", "System woke from suspend");
             handle_event(&mgr, Event::Wake).await;
         }
     }
@@ -44,7 +44,7 @@ pub async fn listen_for_suspend_events(idle_manager: Arc<Mutex<Manager>>) -> Zbu
 
 pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusResult<()> {
     let connection = Connection::system().await?;
-    event_info_scoped!("D-Bus", "Listening for lid open/close events via UPower").await;
+    event_info_scoped!("D-Bus", "Listening for lid open/close events via UPower");
 
     let rule = MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
@@ -59,7 +59,7 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
-                event_error_scoped!("D-Bus", "Error receiving lid message: {e:?}").await;
+                event_error_scoped!("D-Bus", "Error receiving lid message: {e:?}");
                 continue;
             }
         };
@@ -68,7 +68,7 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
         let (iface, changed, _): (String, HashMap<String, Value>, Vec<String>) = match body.deserialize() {
             Ok(val) => val,
             Err(e) => {
-                event_warn_scoped!("D-Bus", "Failed to parse lid event: {e:?}").await;
+                event_warn_scoped!("D-Bus", "Failed to parse lid event: {e:?}");
                 continue;
             }
         };
@@ -79,10 +79,10 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
                 if let Ok(lid_closed) = val.clone().downcast::<bool>() {
                     let mgr = Arc::clone(&idle_manager);
                     if lid_closed {
-                        event_info_scoped!("Power", "Lid closed").await;
+                        event_info_scoped!("Power", "Lid closed");
                         handle_event(&mgr, Event::LidClosed).await;
                     } else {
-                        event_info_scoped!("Power", "Lid opened").await;
+                        event_info_scoped!("Power", "Lid opened");
                         handle_event(&mgr, Event::LidOpened).await;
                     }
                 }
@@ -95,11 +95,11 @@ pub async fn listen_for_lid_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRes
 
 pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusResult<()> {
     let connection = Connection::system().await?;
-    event_info_scoped!("D-Bus", "Listening for loginctl Lock/Unlock events").await;
+    event_info_scoped!("D-Bus", "Listening for loginctl Lock/Unlock events");
 
     let session_path = get_current_session_path(&connection).await?;
     let session_path_clone = session_path.clone();
-    event_info_scoped!("D-Bus", "Monitoring session {}", session_path_clone.as_str()).await;
+    event_info_scoped!("D-Bus", "Monitoring session {}", session_path_clone.as_str());
 
     let proxy = Proxy::new(
         &connection,
@@ -116,14 +116,14 @@ pub async fn listen_for_lock_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusRe
 
     let lock_task = tokio::spawn(async move {
         while let Some(_sig) = lock_stream.next().await {
-            event_info_scoped!("Session", "Received loginctl Lock").await;
+            event_info_scoped!("Session", "Received loginctl Lock");
             handle_event(&lock_mgr, Event::LoginctlLock).await;
         }
     });
 
     let unlock_task = tokio::spawn(async move {
         while let Some(_sig) = unlock_stream.next().await {
-            event_info_scoped!("Session", "Received loginctl Unlock").await;
+            event_info_scoped!("Session", "Received loginctl Unlock");
             handle_event(&unlock_mgr, Event::LoginctlUnlock).await;
         }
     });
@@ -142,21 +142,21 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
 
     if let Ok(session_id) = std::env::var("XDG_SESSION_ID") {
         let session_id_clone = session_id.clone();
-        event_debug_scoped!("D-Bus", "Trying XDG_SESSION_ID: {}", session_id_clone).await;
+        event_debug_scoped!("D-Bus", "Trying XDG_SESSION_ID: {}", session_id_clone);
         let result: Result<zvariant::OwnedObjectPath, zbus::Error> =
             proxy.call("GetSession", &(session_id.as_str(),)).await;
 
         if let Ok(path) = result {
             let path_clone = path.clone();
-            event_info_scoped!("Session", "Using session {} from XDG_SESSION_ID", path_clone.as_str()).await;
+            event_info_scoped!("Session", "Using session {} from XDG_SESSION_ID", path_clone.as_str());
             return Ok(path);
         } else if let Err(e) = result {
-            event_warn_scoped!("Session", "XDG_SESSION_ID lookup failed: {e}").await;
+            event_warn_scoped!("Session", "XDG_SESSION_ID lookup failed: {e}");
         }
     }
 
     let uid = unsafe { libc::getuid() };
-    event_debug_scoped!("Session", "Searching for sessions for UID {}", uid).await;
+    event_debug_scoped!("Session", "Searching for sessions for UID {}", uid);
 
     let sessions: Vec<(String, u32, String, String, zvariant::OwnedObjectPath)> =
         proxy.call("ListSessions", &()).await?;
@@ -175,7 +175,7 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
                 session_id_c,
                 username_c,
                 seat_c
-            ).await;
+            );
 
             if let Ok(sproxy) = Proxy::new(
                 connection,
@@ -194,7 +194,7 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
                         "Session '{}' type: {}",
                         session_id_c2,
                         stype_dbg
-                    ).await;
+                    );
 
                     if (session_type == "wayland" || session_type == "x11") && seat == "seat0" {
                         let session_id_c3 = session_id.clone();
@@ -204,7 +204,7 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
                             "Selected active graphical session '{}' (type: {})",
                             session_id_c3,
                             stype_c3
-                        ).await;
+                        );
                         return Ok(path);
                     }
                 }
@@ -215,20 +215,20 @@ async fn get_current_session_path(connection: &Connection) -> ZbusResult<zvarian
     // fallback: first session for UID
     for (_session_id, session_uid, _username, _seat, path) in sessions {
         if session_uid == uid {
-            event_info_scoped!("Session", "Using first session for UID {}", uid).await;
+            event_info_scoped!("Session", "Using first session for UID {}", uid);
             return Ok(path);
         }
     }
 
     // fallback PID
-    event_warn_scoped!("Session", "No session found for UID {}, falling back to PID method", uid).await;
+    event_warn_scoped!("Session", "No session found for UID {}, falling back to PID method", uid);
     let pid = std::process::id();
     let result: Result<zvariant::OwnedObjectPath, zbus::Error> =
         proxy.call("GetSessionByPID", &(pid,)).await;
 
     if let Ok(path) = result {
         let path_clone = path.clone();
-        event_info_scoped!("Session", "Using session {} from PID {}", path_clone.as_str(), pid).await;
+        event_info_scoped!("Session", "Using session {} from PID {}", path_clone.as_str(), pid);
         Ok(path)
     } else if let Err(e) = result {
         Err(zbus::fdo::Error::Failed(format!(
@@ -247,19 +247,19 @@ pub async fn listen_for_power_events(idle_manager: Arc<Mutex<Manager>>) -> ZbusR
 
     let suspend_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_suspend_events(m1).await {
-            event_error_scoped!("Power", "Suspend listener error: {e:?}").await;
+            event_error_scoped!("Power", "Suspend listener error: {e:?}");
         }
     });
 
     let lid_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_lid_events(m2).await {
-            event_error_scoped!("Power", "Lid listener error: {e:?}").await;
+            event_error_scoped!("Power", "Lid listener error: {e:?}");
         }
     });
 
     let lock_handle = tokio::spawn(async move {
         if let Err(e) = listen_for_lock_events(m3).await {
-            event_error_scoped!("Power", "Lock listener error: {e:?}").await;
+            event_error_scoped!("Power", "Lock listener error: {e:?}");
         }
     });
 

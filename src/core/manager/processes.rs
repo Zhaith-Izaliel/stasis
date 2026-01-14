@@ -99,7 +99,7 @@ pub async fn run_command_detached(command: &str) -> Result<ProcessInfo, ProcessE
         pid,
         pgid,
         expected_name_for_log
-    ).await;
+    );
 
     Ok(ProcessInfo {
         pid,
@@ -146,7 +146,7 @@ pub async fn is_process_active(info: &ProcessInfo) -> bool {
                 pid,
                 pgid,
                 pids.len()
-            ).await;
+            );
             return true;
         }
     }
@@ -158,7 +158,7 @@ pub async fn is_process_active(info: &ProcessInfo) -> bool {
                 "Stasis",
                 "Process group empty, but found '{}' by name",
                 name_for_log
-            ).await;
+            );
             return true;
         }
     }
@@ -222,7 +222,7 @@ pub async fn kill_process_group(info: &ProcessInfo) -> Result<(), ProcessError> 
         "Killing process group {} (original PID: {})",
         pgid,
         pid
-    ).await;
+    );
 
     let _ = Command::new("kill")
         .arg("-TERM")
@@ -237,7 +237,7 @@ pub async fn kill_process_group(info: &ProcessInfo) -> Result<(), ProcessError> 
             "Stasis",
             "Process group {} still alive, sending SIGKILL",
             pgid
-        ).await;
+        );
         let _ = Command::new("kill")
             .arg("-KILL")
             .arg(format!("-{}", pgid))
@@ -280,7 +280,7 @@ pub async fn is_session_locked_logind() -> bool {
                 "logind LockedHint ({}): {}",
                 session_id,
                 trimmed_for_log
-            ).await;
+            );
 
             trimmed == "true"
         }
@@ -290,7 +290,7 @@ pub async fn is_session_locked_logind() -> bool {
                 "Stasis",
                 "Failed to query logind LockedHint: {}",
                 e_owned
-            ).await;
+            );
             false
         }
     }

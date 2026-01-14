@@ -18,7 +18,7 @@ pub fn ensure_user_config_exists() -> std::io::Result<()> {
         
         let contents = generate_default_config();
         fs::write(&path, contents)?;
-        tokio::spawn(event_info_scoped!("Stasis", "Default config config created at {:?}", path));
+        event_info_scoped!("Stasis", "Default config config created at {:?}", path);
     }
     Ok(())
 }

@@ -25,7 +25,7 @@ pub enum AppError {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     if let Err(err) = real_main().await {
-        event_error_scoped!("AppError", "Fatal error: {:?}", err).await;
+        event_error_scoped!("AppError", "Fatal error: {:?}", err);
         save_journal().await;
         exit(1);
     }
@@ -56,14 +56,14 @@ async fn real_main() -> Result<(), AppError> {
     // --- Handle client commands ---
     if let Some(cmd) = command_opt {
         client::handle_client_command(&cmd).await.map_err(|_| {
-            futures::executor::block_on(event_error_scoped!("Client", "Client command failed"));
+            event_error_scoped!("Client", "Client command failed");
             AppError::ClientCommandFailed
         })?;
         return Ok(());
     }
     // --- Ensure Wayland ---
     if var("WAYLAND_DISPLAY").is_err() {
-        event_warn_scoped!("Wayland", "Stasis requires Wayland to run.").await;
+        event_warn_scoped!("Wayland", "Stasis requires Wayland to run.");
         exit(1);
     }
     // --- Single-instance enforcement ---
@@ -71,38 +71,38 @@ async fn real_main() -> Result<(), AppError> {
         .any(|a| matches!(a.as_str(), "-V" | "--version" | "-h" | "--help" | "help"));
     if UnixStream::connect(SOCKET_PATH).await.is_ok() {
         if !help_or_version {
-            event_warn_scoped!("Core", "Another instance of Stasis is already running").await;
+            event_warn_scoped!("Core", "Another instance of Stasis is already running");
         }
         return Ok(());
     }
     // Remove old socket
     if let Err(e) = fs::remove_file(SOCKET_PATH) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            event_error_scoped!("Core", "Failed to remove existing socket: {}", e).await;
+            event_error_scoped!("Core", "Failed to remove existing socket: {}", e);
             return Err(AppError::SocketBindFailed);
         }
     }
     let listener = UnixListener::bind(SOCKET_PATH).map_err(|_| {
-        futures::executor::block_on(event_error_scoped!(
+        event_error_scoped!(
             "Core",
             "Failed to bind control socket. Another instance may be running."
-        ));
+        );
         AppError::SocketBindFailed
     })?;
-    event_info_scoped!("Core", "Control socket bound at {}", SOCKET_PATH).await;
+    event_info_scoped!("Core", "Control socket bound at {}", SOCKET_PATH);
     // --- Ensure user config ---
     if let Err(e) = config::bootstrap::ensure_user_config_exists() {
-        event_warn_scoped!("Config", "Could not initialize config: {}", e).await;
+        event_warn_scoped!("Config", "Could not initialize config: {}", e);
     } else {
-        event_debug_scoped!("Config", "User config initialized").await;
+        event_debug_scoped!("Config", "User config initialized");
     }
     // --- Run daemon ---
-    event_info_scoped!("Daemon", "Starting daemon...").await;
+    event_info_scoped!("Daemon", "Starting daemon...");
     daemon::run_daemon(listener, verbose).await.map_err(|_| {
-        futures::executor::block_on(event_error_scoped!("Daemon", "Daemon failed to start"));
+        event_error_scoped!("Daemon", "Daemon failed to start");
         AppError::DaemonFailed
     })?;
-    event_info_scoped!("Daemon", "Daemon stopped cleanly").await;
+    event_info_scoped!("Daemon", "Daemon stopped cleanly");
 
 
     runtime::runtime_summary(true, None, false).await;

@@ -59,18 +59,18 @@ impl MediaState {
     /// CRITICAL: Browser tabs use per-tab inhibitor counting!
     /// Must decrement once for MPRIS + once PER BROWSER TAB
     pub async fn reset_for_profile_change(&mut self, mgr: &mut Manager) {
-        event_debug_scoped!("Stasis", "Resetting media state for profile change").await;
+        event_debug_scoped!("Stasis", "Resetting media state for profile change");
         
         // MPRIS: decrement once if active
         if self.mpris_media_playing {
-            event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor").await;
+            event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor");
             decr_active_inhibitor(mgr, InhibitorSource::Media).await;
         }
         
         // Browser: decrement once PER TAB (each tab increments separately!)
         let tab_count = self.browser_playing_tab_count;
         if tab_count > 0 {
-            event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count).await;
+            event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count);
             for _ in 0..tab_count {
                 decr_active_inhibitor(mgr, InhibitorSource::Media).await;
             }
@@ -84,7 +84,7 @@ impl MediaState {
         self.browser_playing_tab_count = 0;
         // Don't reset media_bridge_active - it's independent of profile
         
-        event_debug_scoped!("Stasis", "Media state reset complete").await;
+        event_debug_scoped!("Stasis", "Media state reset complete");
     }
     
     pub fn log_state(&self) { 
@@ -94,13 +94,13 @@ impl MediaState {
         let tabs = self.browser_playing_tab_count;
         let mpris_playing = self.media_playing;
 
-        tokio::spawn(event_debug_scoped!(
+        event_debug_scoped!(
             "Media",
             "Media State: bridge_active={}, browser_playing={} (tabs={}), mpris_playing={}",
             bridge_active,
             browser_playing,
             tabs,
             mpris_playing,
-        ));
+        );
     }
 }

@@ -11,7 +11,7 @@ pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
     let mgr = manager.lock().await;
     if !mgr.state.is_laptop() {
         let _ = tokio::spawn(async {
-            event_info_scoped!("Power", "Desktop detected, skipping power source check").await;
+            event_info_scoped!("Power", "Desktop detected, skipping power source check");
         });
         return true;
     }
@@ -31,8 +31,7 @@ pub async fn detect_initial_power_state(manager: &Arc<Mutex<Manager>>) -> bool {
             "Initial power detection: {} (active block: {})",
             if on_ac { "AC" } else { "Battery" },
             current_block
-        )
-        .await;
+        );
     });
 
     on_ac
@@ -94,7 +93,7 @@ pub async fn spawn_power_source_monitor(manager: Arc<Mutex<Manager>>) {
             last_on_ac = on_ac;
             let source = if on_ac { "AC" } else { "Battery" };
             let _ = tokio::spawn(async move {
-                event_debug_scoped!("Power", "Power source changed: {}", source).await;
+                event_debug_scoped!("Power", "Power source changed: {}", source);
             });
 
             // Emit event instead of mutating state directly

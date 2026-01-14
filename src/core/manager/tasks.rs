@@ -42,7 +42,7 @@ impl TaskManager {
         if self.spawned_tasks.len() < MAX_SPAWNED_TASKS {
             self.spawned_tasks.push(tokio::spawn(fut));
         } else {
-            tokio::spawn(event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn"));
+            event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn");
         }
     }
 
@@ -56,10 +56,10 @@ impl TaskManager {
                     // Task finished cleanly
                 }
                 Ok(Err(e)) => {
-                    event_error_scoped!("Stasis", "{} task panicked: {}", name, e).await;
+                    event_error_scoped!("Stasis", "{} task panicked: {}", name, e);
                 }
                 Err(_) => {
-                    event_info_scoped!("Stasis", "{} task didn't finish in time, aborting", name).await;
+                    event_info_scoped!("Stasis", "{} task didn't finish in time, aborting", name);
                     // Note: handle was consumed by timeout, already dropped
                 }
             }
@@ -117,6 +117,6 @@ where
     if tasks.len() < MAX_SPAWNED_TASKS {
         tasks.push(tokio::spawn(fut));
     } else {
-        tokio::spawn(event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn"));
+        event_info_scoped!("Stasis", "Max spawned tasks reached, skipping task spawn");
     }
 }

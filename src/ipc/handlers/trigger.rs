@@ -18,7 +18,7 @@ pub async fn handle_trigger(
 
     runtime::scoped_async(Some("TriggerCommand"), || async move {
         if action_owned.is_empty() {
-            event_error_scoped!("TriggerCommand", "Trigger command missing action name").await;
+            event_error_scoped!("TriggerCommand", "Trigger command missing action name");
             return "ERROR: No action name provided".to_string();
         }
 
@@ -38,7 +38,7 @@ async fn trigger_all(manager: Arc<Mutex<Manager>>) -> String {
     runtime::scoped_async(Some("TriggerAll"), || async move {
         let mut mgr = manager.lock().await;
         trigger_all_idle_actions(&mut mgr).await;
-        event_debug_scoped!("TriggerAll", "Triggered all idle actions").await;
+        event_debug_scoped!("TriggerAll", "Triggered all idle actions");
         "All idle actions triggered".to_string()
     })
     .await
@@ -132,7 +132,7 @@ pub async fn trigger_action_by_name(
             "TriggerAction",
             "Action triggered via IPC '{}'",
             strip_action_prefix(&action_name_for_log)
-        ).await;
+        );
 
         let is_lock = matches!(action.kind, crate::config::model::IdleAction::LockScreen);
 
@@ -140,7 +140,7 @@ pub async fn trigger_action_by_name(
             let uses_loginctl = action.command.contains("loginctl lock-session");
 
             if uses_loginctl {
-                event_info_scoped!("TriggerAction", "Lock uses loginctl lock-session, triggering via IPC").await;
+                event_info_scoped!("TriggerAction", "Lock uses loginctl lock-session, triggering via IPC");
                 if let Err(e) = run_command_detached(&action.command).await {
                     return Err(format!("Failed to trigger lock: {}", e));
                 }

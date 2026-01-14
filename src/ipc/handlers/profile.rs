@@ -14,7 +14,7 @@ pub async fn handle_profile(
 
     runtime::scoped_async(Some("ProfileCommand"), || async move {
         if profile_arg_owned.is_empty() {
-            event_error_scoped!("ProfileCommand", "Profile command missing profile name").await;
+            event_error_scoped!("ProfileCommand", "Profile command missing profile name");
             return "ERROR: No profile name provided".to_string();
         }
 
@@ -39,12 +39,12 @@ pub async fn handle_profile(
                     "ProfileCommand",
                     "Profile switched: {}",
                     profile_name_for_log
-                ).await;
+                );
                 msg
             }
             Err(e) => {
                 let e_for_log = e.clone(); // clone for macro
-                event_error_scoped!("ProfileCommand", "Failed to set profile: {}", e_for_log).await;
+                event_error_scoped!("ProfileCommand", "Failed to set profile: {}", e_for_log);
                 format!("ERROR: {}", e)
             }
         }

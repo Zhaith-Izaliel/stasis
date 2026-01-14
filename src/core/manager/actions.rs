@@ -26,7 +26,7 @@ pub async fn prepare_action(action: &IdleActionBlock) -> Vec<ActionRequest> {
             let probe_cmd = action.lock_command.clone().unwrap_or(action.command.clone());
             
             if is_process_running(&probe_cmd).await {
-                event_info_scoped!("Stasis", "Lockscreen already running, skipping action.").await;
+                event_info_scoped!("Stasis", "Lockscreen already running, skipping action.");
                 vec![ActionRequest::Skip(probe_cmd)]
             } else {
                 vec![ActionRequest::RunCommand(cmd)]
@@ -60,7 +60,7 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
         kind_for_log, // Macro moves 'kind_for_log'
         timeout,
         cmd_for_log   // Macro moves 'cmd_for_log'
-    ).await; 
+    ); 
     // 'kind' and 'command' are still safe to use below!
 
     // Lock screen handling
@@ -73,19 +73,19 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
 
         if use_logind && command.contains("loginctl lock-session") {
             if let Err(e) = run_command_detached(&command).await {
-                event_error_scoped!("Stasis", "Failed loginctl lock-session '{}': {}", command, e).await;
+                event_error_scoped!("Stasis", "Failed loginctl lock-session '{}': {}", command, e);
             }
             return;
         }
 
         if mgr.state.lock.is_locked {
-            event_debug_scoped!("Stasis", "Lock screen action skipped: already locked").await;
+            event_debug_scoped!("Stasis", "Lock screen action skipped: already locked");
             return;
         }
 
         mgr.state.lock.is_locked = true;
         mgr.state.lock_notify.notify_one();
-        event_info_scoped!("Stasis", "Lock screen action triggered").await;
+        event_info_scoped!("Stasis", "Lock screen action triggered");
     }
 
     // Pre-suspend
@@ -96,11 +96,11 @@ pub async fn run_action(mgr: &mut Manager, action: &IdleActionBlock) {
                 
                 // --- FIX FOR ERROR 3 (pre_suspend_cmd) ---
                 let pre_suspend_for_log = pre_suspend_cmd.clone();
-                event_info_scoped!("Stasis", "Running pre-suspend command: {}", pre_suspend_for_log).await;
+                event_info_scoped!("Stasis", "Running pre-suspend command: {}", pre_suspend_for_log);
                 
                 // Now we can safely borrow the original
                 if let Err(e) = run_command_detached(&pre_suspend_cmd).await {
-                    event_error_scoped!("Stasis", "Pre-suspend command failed: {}", e).await;
+                    event_error_scoped!("Stasis", "Pre-suspend command failed: {}", e);
                 } else {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
@@ -131,16 +131,16 @@ pub async fn run_command_for_action(
         let is_loginctl = cmd.contains("loginctl lock-session");
 
         if is_loginctl {
-            event_info_scoped!("Stasis", "Lock triggered via loginctl").await;
+            event_info_scoped!("Stasis", "Lock triggered via loginctl");
 
             if let Err(e) = run_command_detached(&cmd).await {
                 let cmd_owned = cmd.clone();
-                event_error_scoped!("Stasis", "Failed to run loginctl '{}': {}", cmd_owned, e).await;
+                event_error_scoped!("Stasis", "Failed to run loginctl '{}': {}", cmd_owned, e);
             }
 
             if let Some(lock_cmd) = &action.lock_command {
                 let lock_cmd_owned = lock_cmd.clone();
-                event_info_scoped!("Stasis", "Running and tracking lock-command: {}", lock_cmd_owned).await;
+                event_info_scoped!("Stasis", "Running and tracking lock-command: {}", lock_cmd_owned);
 
                 match run_command_detached(lock_cmd).await {
                     Ok(process_info) => {
@@ -151,7 +151,7 @@ pub async fn run_command_for_action(
                             "Lock started: PID={}, PGID={}",
                             process_info.pid,
                             process_info.pgid
-                        ).await;
+                        );
                     }
                     Err(e) => {
                         let lock_cmd_owned = lock_cmd.clone();
@@ -160,11 +160,11 @@ pub async fn run_command_for_action(
                             "Failed to run lock-command '{}': {}",
                             lock_cmd_owned,
                             e
-                        ).await;
+                        );
                     }
                 }
             } else {
-                event_warn_scoped!("Stasis", "loginctl used but no lock-command configured.").await;
+                event_warn_scoped!("Stasis", "loginctl used but no lock-command configured.");
                 mgr.state.lock.is_locked = true;
             }
 
@@ -173,14 +173,14 @@ pub async fn run_command_for_action(
 
         // Normal locker
         let cmd_owned = cmd.clone();
-        event_info_scoped!("Stasis", "Running lock command: {}", cmd_owned).await;
+        event_info_scoped!("Stasis", "Running lock command: {}", cmd_owned);
 
         match run_command_detached(&cmd).await {
             Ok(mut process_info) => {
                 if let Some(lock_cmd) = &action.lock_command {
                     let lock_cmd_owned = lock_cmd.clone();
                     process_info.expected_process_name = Some(lock_cmd_owned.clone());
-                    event_info_scoped!("Stasis", "Using lock-command as process name override: {}", lock_cmd_owned).await;
+                    event_info_scoped!("Stasis", "Using lock-command as process name override: {}", lock_cmd_owned);
                 }
 
                 mgr.state.lock.process_info = Some(process_info.clone());
@@ -192,11 +192,11 @@ pub async fn run_command_for_action(
                     process_info.pid,
                     process_info.pgid,
                     process_info.expected_process_name
-                ).await;
+                );
             }
             Err(e) => {
                 let cmd_owned = cmd.clone();
-                event_error_scoped!("Stasis", "Failed to run '{}': {}", cmd_owned, e).await;
+                event_error_scoped!("Stasis", "Failed to run '{}': {}", cmd_owned, e);
             }
         }
 
@@ -217,13 +217,13 @@ pub async fn run_command_for_action(
         "Running {} command: {}",
         action_type,
         cmd_owned
-    ).await;
+    );
 
     let cmd_owned_for_spawn = cmd.clone();
     let spawned = tokio::spawn(async move {
         if let Err(e) = run_command_silent(&cmd_owned_for_spawn).await {
             let cmd_for_err = cmd_owned_for_spawn.clone();
-            event_error_scoped!("Stasis", "Failed to run command '{}': {}", cmd_for_err, e).await;
+            event_error_scoped!("Stasis", "Failed to run command '{}': {}", cmd_for_err, e);
         }
     });
 

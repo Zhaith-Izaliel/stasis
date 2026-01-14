@@ -26,7 +26,7 @@ impl AppInhibitor {
 
         // log without moving the variable
         let desktop_for_log = desktop.clone();
-        tokio::spawn(event_debug_scoped!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop_for_log));
+        event_debug_scoped!("Stasis", "XDG_CURRENT_DESKTOP detected: {}", desktop_for_log);
 
         Self {
             active_apps: HashSet::new(),
@@ -83,7 +83,7 @@ impl AppInhibitor {
         // Log newly detected apps (iterate over owned clone to avoid borrowing issues)
         for app in new_active_apps.clone() {
             if !self.active_apps.contains(&app) {
-                event_info_scoped!("Stasis", "App inhibit active: {}", app).await;
+                event_info_scoped!("Stasis", "App inhibit active: {}", app);
             }
         }
 
@@ -243,7 +243,7 @@ pub async fn spawn_app_inhibit_task(
     let inhibitor = Arc::new(Mutex::new(AppInhibitor::new(Arc::clone(&manager))));
 
     if !has_apps {
-        event_info_scoped!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.").await;
+        event_info_scoped!("Stasis", "No inhibit_apps configured, sleeping app inhibitor.");
         let inhibitor_clone = Arc::clone(&inhibitor);
         let handle = tokio::spawn(async move {
             let inhibitor_guard = inhibitor_clone.lock().await;
@@ -251,7 +251,7 @@ pub async fn spawn_app_inhibit_task(
             let shutdown = manager_guard.state.shutdown_flag.clone();
 
             shutdown.notified().await;
-            event_info_scoped!("Stasis", "App inhibitor shutting down...").await;
+            event_info_scoped!("Stasis", "App inhibitor shutting down...");
         });
         return (inhibitor, handle);
     }
@@ -270,7 +270,7 @@ pub async fn spawn_app_inhibit_task(
 
             tokio::select! {
                 _ = shutdown.notified() => {
-                    event_info_scoped!("Stasis", "App inhibitor shutting down...").await;
+                    event_info_scoped!("Stasis", "App inhibitor shutting down...");
                     break;
                 }
                 

@@ -33,18 +33,18 @@ impl Manager {
         {
             use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor};
             
-            event_debug_scoped!("Stasis", "Resetting media state for profile change").await;
+            event_debug_scoped!("Stasis", "Resetting media state for profile change");
             
             // MPRIS media: decrement once if active
             if self.state.media.mpris_media_playing {
-                event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor").await;
+                event_debug_scoped!("Stasis", "Clearing MPRIS media inhibitor");
                 decr_active_inhibitor(self, InhibitorSource::Media).await;
             }
             
             // Browser media: decrement once PER TAB (not just once!)
             let tab_count = self.state.media.browser_playing_tab_count;
             if tab_count > 0 {
-                event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count).await;
+                event_debug_scoped!("Stasis", "Clearing {} browser tab inhibitors", tab_count);
                 for _ in 0..tab_count {
                     decr_active_inhibitor(self, InhibitorSource::Media).await;
                 }
@@ -58,7 +58,7 @@ impl Manager {
             self.state.media.browser_playing_tab_count = 0;
             // Don't reset media_bridge_active - it's independent of profile
             
-            event_debug_scoped!("Stasis", "Media state reset complete").await;
+            event_debug_scoped!("Stasis", "Media state reset complete");
         }
         
         // Refresh app inhibitors config
@@ -74,7 +74,7 @@ impl Manager {
         if !media_enabled {
             use crate::core::manager::inhibitors::{InhibitorSource, decr_active_inhibitor};
 
-            event_debug_scoped!("Stasis", "Profile does not enable media; force disabling all media handling").await;
+            event_debug_scoped!("Stasis", "Profile does not enable media; force disabling all media handling");
 
             // Clear MPRIS inhibitor if active
             if self.state.media.mpris_media_playing {

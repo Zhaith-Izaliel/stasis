@@ -171,14 +171,14 @@ impl ManagerState {
         self.timing.last_activity = Instant::now();
 
         let current_block = self.power.current_block.clone();
-        event_debug_scoped!("Stasis", "Idle timers reloaded from config (active block: {})", current_block).await;
+        event_debug_scoped!("Stasis", "Idle timers reloaded from config (active block: {})", current_block);
     }
 
     /// NEW: Reload profiles from combined config
     pub async fn reload_profiles(&mut self, combined: &CombinedConfig) {
         self.profile.update_profiles(combined.profiles.clone());
         let profile_count = combined.profiles.len();
-        event_debug_scoped!("Stasis", "Reloaded {} profile(s)", profile_count).await;
+        event_debug_scoped!("Stasis", "Reloaded {} profile(s)", profile_count);
     }
 
     pub fn wake_idle_tasks(&self) {

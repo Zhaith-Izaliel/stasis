@@ -110,7 +110,7 @@ impl PowerState {
 
         if new_block != self.current_block {
             let old = std::mem::replace(&mut self.current_block, new_block.clone());
-            tokio::spawn(event_info_scoped!("Stasis", "Switched block: {} → {}", old, new_block));
+            event_info_scoped!("Stasis", "Switched block: {} → {}", old, new_block);
             return true;
         }
 

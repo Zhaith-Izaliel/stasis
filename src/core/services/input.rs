@@ -50,7 +50,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 tokio::select! {
                     maybe_event = rx.recv() => {
                         if maybe_event.is_none() {
-                            event_info_scoped!("Libinput", "Input async handler channel closed").await;
+                            event_info_scoped!("Libinput", "Input async handler channel closed");
                             break;
                         }
 
@@ -64,7 +64,7 @@ pub fn spawn_input_task(manager: Arc<Mutex<Manager>>) -> impl std::future::Futur
                 }
             }
 
-            event_info_scoped!("Libinput", "event loop shutting down...").await;
+            event_info_scoped!("Libinput", "event loop shutting down...");
         });
 
         // Blocking thread: libinput event polling

@@ -46,13 +46,13 @@ const ALWAYS_LOCAL_PLAYERS: &[&str] = &[
 ];
 
 pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>) -> Result<(), MediaError> {
-    event_info_scoped!("MPRIS", "Starting media monitor").await;
+    event_info_scoped!("MPRIS", "Starting media monitor");
 
     task::spawn(async move {
         let conn = match Connection::session().await {
             Ok(c) => c,
             Err(e) => {
-                event_error_scoped!("MPRIS", "Failed to connect to D-Bus: {}", e).await;
+                event_error_scoped!("MPRIS", "Failed to connect to D-Bus: {}", e);
                 return;
             }
         };
@@ -66,7 +66,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         {
             Ok(r) => r,
             Err(e) => {
-                event_error_scoped!("MPRIS", "Failed to build match rule: {}", e).await;
+                event_error_scoped!("MPRIS", "Failed to build match rule: {}", e);
                 return;
             }
         };
@@ -74,7 +74,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         let mut stream = match MessageStream::for_match_rule(rule, &conn, None).await {
             Ok(s) => s,
             Err(e) => {
-                event_error_scoped!("MPRIS", "Failed to create message stream: {}", e).await;
+                event_error_scoped!("MPRIS", "Failed to create message stream: {}", e);
                 return;
             }
         };
@@ -93,16 +93,16 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
             };
             
             if !monitor_enabled {
-                event_debug_scoped!("MPRIS", "Media monitoring disabled by config, skipping initial check").await;
+                event_debug_scoped!("MPRIS", "Media monitoring disabled by config, skipping initial check");
             } else if bridge_active {
-                event_debug_scoped!("MPRIS", "Bridge active at startup, MPRIS monitoring paused").await;
+                event_debug_scoped!("MPRIS", "Bridge active at startup, MPRIS monitoring paused");
             } else {
                 let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                 should_poll = any_playing;
                 if any_playing {
-                    event_debug_scoped!("MPRIS", "Initial check: media playing, polling enabled").await;
+                    event_debug_scoped!("MPRIS", "Initial check: media playing, polling enabled");
                 } else {
-                    event_debug_scoped!("MPRIS", "Initial check: no media, polling disabled").await;
+                    event_debug_scoped!("MPRIS", "Initial check: no media, polling disabled");
                 }
             }
         }
@@ -116,7 +116,7 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
         loop {
             tokio::select! {
                 _ = shutdown.notified() => {
-                    event_info_scoped!("MPRIS", "Media monitor shutting down...").await;
+                    event_info_scoped!("MPRIS", "Media monitor shutting down...");
                     break;
                 }
                 
@@ -132,19 +132,19 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     if !monitor_enabled || bridge_active {
                         should_poll = false;
                         if bridge_active {
-                            event_debug_scoped!("MPRIS", "Bridge activated, pausing MPRIS monitoring").await;
+                            event_debug_scoped!("MPRIS", "Bridge activated, pausing MPRIS monitoring");
                         }
                         continue;
                     }
                     
                     // Periodic check - catches cases where MPRIS doesn't fire events
-                    event_debug_scoped!("MPRIS", "Periodic pactl check (polling enabled)").await;
+                    event_debug_scoped!("MPRIS", "Periodic pactl check (polling enabled)");
                     let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                     
                     // Disable polling if nothing is playing anymore
                     if !any_playing {
                         should_poll = false;
-                        event_debug_scoped!("MPRIS", "All media stopped/paused, disabling polling").await;
+                        event_debug_scoped!("MPRIS", "All media stopped/paused, disabling polling");
                     }
                 }
                 
@@ -162,26 +162,26 @@ pub async fn spawn_media_monitor_dbus(manager: Arc<tokio::sync::Mutex<Manager>>)
                     
                     // Skip events if bridge is active or monitoring disabled
                     if !monitor_enabled {
-                        event_debug_scoped!("MPRIS", "Media monitoring disabled, skipping event").await;
+                        event_debug_scoped!("MPRIS", "Media monitoring disabled, skipping event");
                         continue;
                     }
                     
                     if bridge_active {
-                        event_debug_scoped!("MPRIS", "Bridge active, skipping MPRIS event").await;
+                        event_debug_scoped!("MPRIS", "Bridge active, skipping MPRIS event");
                         continue;
                     }
                     
                     // MPRIS event - check immediately
-                    event_debug_scoped!("MPRIS", "MPRIS event detected").await;
+                    event_debug_scoped!("MPRIS", "MPRIS event detected");
                     let any_playing = check_and_update_media_state(Arc::clone(&manager)).await;
                     
                     // Enable polling if something started playing
                     if any_playing && !should_poll {
                         should_poll = true;
-                        event_debug_scoped!("MPRIS", "Media started playing, enabling polling").await;
+                        event_debug_scoped!("MPRIS", "Media started playing, enabling polling");
                     } else if !any_playing && should_poll {
                         should_poll = false;
-                        event_debug_scoped!("MPRIS", "All media stopped, disabling polling").await;
+                        event_debug_scoped!("MPRIS", "All media stopped, disabling polling");
                     }
                 }
             }
@@ -222,11 +222,11 @@ async fn check_and_update_media_state(manager: Arc<tokio::sync::Mutex<Manager>>)
     let mut mgr = manager.lock().await;
     
     if any_playing && !mgr.state.media.mpris_media_playing {
-        event_debug_scoped!("MPRIS", "Media started").await;
+        event_debug_scoped!("MPRIS", "Media started");
         incr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         mgr.state.media.mpris_media_playing = true;
     } else if !any_playing && mgr.state.media.mpris_media_playing {
-        event_debug_scoped!("MPRIS", "Media stopped").await;
+        event_debug_scoped!("MPRIS", "Media stopped");
         decr_active_inhibitor(&mut mgr, InhibitorSource::Media).await;
         mgr.state.media.mpris_media_playing = false;
     }
@@ -253,7 +253,7 @@ pub async fn check_media_playing(
     if !skip_firefox {
         if has_playerctl_players() {
             let has_uncorked = has_any_uncorked_audio();
-            event_debug_scoped!("MPRIS", "Firefox pactl check: playerctl_players=true, uncorked_audio={}", has_uncorked).await;
+            event_debug_scoped!("MPRIS", "Firefox pactl check: playerctl_players=true, uncorked_audio={}", has_uncorked);
 
             if has_uncorked {
                 return true;
@@ -261,7 +261,7 @@ pub async fn check_media_playing(
 
             // The transient case — consult MPRIS for browser players as a *fast* fallback
             // Because MPRIS may already report Playing before pactl uncorks the stream.
-            event_debug_scoped!("MPRIS", "playerctl players exist but audio corked; checking MPRIS playback status for browser players").await;
+            event_debug_scoped!("MPRIS", "playerctl players exist but audio corked; checking MPRIS playback status for browser players");
             if let Ok(finder) = PlayerFinder::new() {
                 if let Ok(players) = finder.find_all() {
                     for player in players.into_iter() {
@@ -269,7 +269,7 @@ pub async fn check_media_playing(
                         // only check browser/firefox identity here
                         if id.contains("firefox") || id.contains("chrome") || id.contains("chromium") {
                             if player.get_playback_status().map(|s| s == PlaybackStatus::Playing).unwrap_or(false) {
-                                tokio::spawn(event_debug_scoped!("MPRIS", "Browser MPRIS reports Playing (transient) for: {}", id));
+                                event_debug_scoped!("MPRIS", "Browser MPRIS reports Playing (transient) for: {}", id);
                                 return true;
                             }
                         }
@@ -282,13 +282,13 @@ pub async fn check_media_playing(
                 let backoff_ms = 50 * (i + 1); // 50, 100, 150 ms
                 sleep(Duration::from_millis(backoff_ms)).await;
                 if has_any_uncorked_audio() {
-                    event_debug_scoped!("MPRIS", "pactl detected uncorked audio after {}ms retry", backoff_ms).await;
+                    event_debug_scoped!("MPRIS", "pactl detected uncorked audio after {}ms retry", backoff_ms);
                     return true;
                 }
             }
 
             // After consulting MPRIS and retrying pactl briefly, treat as paused and continue to check others.
-            event_debug_scoped!("MPRIS", "Firefox/browser players appear corked/paused after retries").await;
+            event_debug_scoped!("MPRIS", "Firefox/browser players appear corked/paused after retries");
         }
     }
 
@@ -308,7 +308,7 @@ pub async fn check_media_playing(
     };
 
     if playing_players.is_empty() {
-        tokio::spawn(event_debug_scoped!("MPRIS", "No MPRIS players reporting as playing"));
+        event_debug_scoped!("MPRIS", "No MPRIS players reporting as playing");
         return false;
     }
 
@@ -318,7 +318,7 @@ pub async fn check_media_playing(
         
         // If we did the pactl check and it indicated firefox players exist, we already handled transient case above.
         if !skip_firefox && identity.contains("firefox") {
-            tokio::spawn(event_debug_scoped!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl fallback)"));
+            event_debug_scoped!("MPRIS", "Skipping Firefox MPRIS check (already checked via pactl fallback)");
             continue;
         }
 
@@ -332,7 +332,7 @@ pub async fn check_media_playing(
         });
         
         if is_blacklisted {
-            tokio::spawn(event_debug_scoped!("MPRIS", "Player blacklisted: {}", identity));
+            event_debug_scoped!("MPRIS", "Player blacklisted: {}", identity);
             continue;
         }
         
@@ -342,25 +342,25 @@ pub async fn check_media_playing(
         });
         
         if is_always_local {
-            tokio::spawn(event_debug_scoped!("MPRIS", "Local player detected via MPRIS: {}", identity));
+            event_debug_scoped!("MPRIS", "Local player detected via MPRIS: {}", identity);
             return true;
         }
         
         if ignore_remote_media {
             if is_player_local_by_pactl(&identity) {
-                tokio::spawn(event_debug_scoped!("MPRIS", "Remote media check passed for: {}", identity));
+                event_debug_scoped!("MPRIS", "Remote media check passed for: {}", identity);
                 return true;
             } else {
-                tokio::spawn(event_debug_scoped!("MPRIS", "Ignoring remote player: {}", identity));
+                event_debug_scoped!("MPRIS", "Ignoring remote player: {}", identity);
                 continue;
             }
         } else {
-            tokio::spawn(event_debug_scoped!("MPRIS", "Player detected via MPRIS: {}", identity));
+            event_debug_scoped!("MPRIS", "Player detected via MPRIS: {}", identity);
             return true;
         }
     }
     
-    tokio::spawn(event_debug_scoped!("MPRIS", "No valid playing media detected"));
+    event_debug_scoped!("MPRIS", "No valid playing media detected");
     false
 }
 
