@@ -565,9 +565,9 @@ dependencies = [
 
 [[package]]
 name = "eventline"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a887cd8da83f2da4037d7f9c78b31dc852baedb092a55e13fdf1192d3e824d32"
+checksum = "be1f34e57bbedcd13eff112d57df02bcd748a773393fb1148f3b53b00dd000d8"
 dependencies = [
  "chrono",
  "futures",
