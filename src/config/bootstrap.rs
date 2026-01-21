@@ -1,32 +1,40 @@
-use std::fs;
-use crate::core::utils::{detect_chassis, ChassisKind};
-use eventline::{event_info_scoped};
+// Author: Dustin Pilgrim
+// License: MIT
+//
+// Description: Creates an initial ~/.config/stasis/stasis.rune on first run.
+// Chooses a desktop vs laptop template based on chassis detection.
 
-pub fn ensure_user_config_exists() -> std::io::Result<()> {
-    if let Some(mut path) = dirs::home_dir() {
-        path.push(".config/stasis");
-        
-        if !path.exists() {
-            fs::create_dir_all(&path)?;
+use std::fs;
+use std::io;
+
+use crate::core::utils::{detect_chassis, ChassisKind};
+
+pub fn ensure_user_config_exists() -> io::Result<()> {
+    let path = super::default_user_config_path();
+
+    // Ensure parent dir exists
+    if let Some(dir) = path.parent() {
+        if !dir.exists() {
+            fs::create_dir_all(dir)?;
         }
-        
-        path.push("stasis.rune");
-        
-        if path.exists() {
-            return Ok(());
-        }
-        
-        let contents = generate_default_config();
-        fs::write(&path, contents)?;
-        event_info_scoped!("Stasis", "Default config config created at {:?}", path);
     }
+
+    // If already present, do nothing.
+    if path.exists() {
+        return Ok(());
+    }
+
+    let contents = generate_default_config();
+    fs::write(&path, contents)?;
+
+    eventline::info!("Stasis: created default config at {}", path.display());
     Ok(())
 }
 
 fn generate_default_config() -> String {
     match detect_chassis() {
         ChassisKind::Laptop => default_laptop_config(),
-        ChassisKind::Desktop => default_desktop_config(),
+        _ => default_desktop_config(), // Desktop + Unknown fall back here
     }
 }
 
@@ -39,125 +47,89 @@ fn default_laptop_config() -> String {
 @author "Dustin Pilgrim"
 @description "Lightweight feature packed idle manager for Wayland"
 
-# Everything related to your configuration goes under this block
-# stasis:
-# ...
-# end
-stasis:
-  # Specify a command to run before suspending
-  # Perhaps ensure the session is locked
+# IMPORTANT (new semantics):
+# - Everything lives under `default:` (and optional profile blocks).
+# - On laptops, Stasis chooses between:
+#     `default.ac:` and `default.battery:`
+#   depending on current power source.
+
+active_profile null
+
+default:
+  # Optional: run before suspending (e.g., ensure lock is up)
   #pre_suspend_command "swaylock"
 
-  monitor_media true 
-  ignore_remote_media true # Ignore remote players such as Spotify, KDE Connect, etc.
+  monitor_media true
+  ignore_remote_media true # ignore remote players (spotify/kdeconnect/etc.)
 
-  # Stasis allows you to define a list of media players that you want
-  # to ignore when inhibiting Stasis based on media playback
-  #media_blacklist ["spotify"] 
-  
-  respect_idle_inhibitors true
+  # Optional: ignore these media sources for media inhibit (case-insensitive)
+  #media_blacklist ["spotify"]
 
-  # Lock detection method: "process" (default) or "logind"
-  # Use "logind" if your locker uses loginctl (e.g., quickshell)
-  #lock_detection_type "process"
+  # Debounce window in seconds before starting the plan (default 0)
+  #debounce_seconds 4
 
-  # For laptops:
-  #
-  # you can specify an action to do on lid close/open
-  # lid_close_action:
-  #   can be one of: lock-screen | suspend | custom | ignore
-  #
-  # lid_open_action:
-  #   can be one of: wake | custom | ignore
-  #
-  # NOTE: For custom just define a string directly do NOT write 
-  # `custom`
-  #
-  # i.e. lid_close_action "hyprlock && sleep 3 && systemctl suspend"
-  # or
-  # lid-close-action "hyprlock && sleep 3 && systemctl suspend"
-  #
-  #lid_close_action "lock-screen"
-  #lid_open_action "wake"
-
-  # Uncomment to customized debounce, default is 0
-  # debounce_seconds 4
-
-  # enable notifications when Stasis unpauses from 
-  # `stasis pause for <DURATION>`
-  #  or
-  #  `stasis pause until <TIME>`
-  # run stasis pause help for more information
+  # Notify when resuming from IPC pause (e.g., `stasis pause 1h`)
   #notify_on_unpause true
 
-  # notifications before actions are run [DEFAULT: false]
-  # You must also set `notification` in the block you want it in
-  # e.g.
-  #   lock-screen:
-  #   ...
-  #   notification: "Locking session in 10s"
-  #   end
-  #
-  #notify-before-command true
+  # Global gate: notifications before steps only happen if this is true
+  #notify_before_action true
 
-  # number of seconds before a command this should notify [DEFAULT: 0]
-  # specify the number of seconds this will trigger a
-  # notification before running your desired blocks.
-  # 
-  # NOTE: This is also ontop of any configured debounce
-  # so if you have 10s timeout + 5s debounce + notify 10s before
-  # it would -> 10s timeout -> 5s debounce -> notify then wait 10s -> run your action block!
-  # super complex stuff here reaching desktop level complexity for Wayland!
-  #notify-seconds-before 10
-  
+  # App/process inhibit patterns (strings or regex literals)
   inhibit_apps [
     "vlc"
     "mpv"
     r"steam_app_.*"
   ]
-  
-  # Laptop-specific: AC power settings (relaxed timeouts)
-  on_ac:
+
+  # Laptop plan: AC power (relaxed)
+  ac:
     brightness:
       timeout 300 # 5 minute(s)
       command "brightnessctl set 50%"
     end
-    
+
     dpms:
       timeout 120 # 2 minute(s) after brightness
       command "niri msg action power-off-monitors"
-      resume-command "niri msg action power-on-monitors"
+      resume_command "niri msg action power-on-monitors"
     end
-    
+
     lock_screen:
       timeout 180 # 3 minute(s) after dpms
       command "swaylock"
+
+      # Optional per-step notification:
+      #notification "Locking session soon"
+      #notify_seconds_before 10
     end
-    
+
     suspend:
       timeout 600 # 10 minute(s) after lock
       command "systemctl suspend"
     end
   end
-  
-  # Laptop-specific: Battery power settings (aggressive power saving)
-  on_battery:
+
+  # Laptop plan: Battery power (aggressive)
+  battery:
     brightness:
       timeout 60 # 1 minute(s)
       command "brightnessctl set 30%"
     end
-    
+
     dpms:
       timeout 30 # 30 second(s) after brightness
       command "niri msg action power-off-monitors"
-      resume-command "niri msg action power-on-monitors"
+      resume_command "niri msg action power-on-monitors"
     end
-    
+
     lock_screen:
       timeout 60 # 1 minute(s) after dpms
       command "swaylock"
+
+      # Optional loginctl integration for lock step only:
+      #use_loginctl true
     end
-    
+
     suspend:
       timeout 120 # 2 minute(s) after lock
       command "systemctl suspend"
@@ -178,73 +150,52 @@ fn default_desktop_config() -> String {
 @author "Dustin Pilgrim"
 @description "Lightweight feature packed idle manager for Wayland"
 
-# Everything related to your configuration goes under this block
-# stasis:
-# ...
-# end
-stasis:
-  # Specify a command to run before suspending
-  # Perhaps ensure the session is locked
+active_profile null
+
+default:
+  # Optional: run before suspending (e.g., ensure lock is up)
   #pre_suspend_command "swaylock"
-  
+
   monitor_media true
-  ignore_remote_media true # Ignore remote players such as Spotify, KDE Connect, etc.
-  # Stasis allows you to define a list of media players that you want
-  # to ignore when inhibiting Stasis based on media playback
-  #media_blacklist ["spotify"] 
-  respect_idle_inhibitors true
+  ignore_remote_media true # ignore remote players (spotify/kdeconnect/etc.)
 
-  # Lock detection method: "process" (default) or "logind"
-  # Use "logind" if your locker uses loginctl (e.g., quickshell)
-  #lock_detection_type "process"
-  
-  # debounce: default is 0s; can be customized if needed
-  #debounce-seconds 4
+  # Optional: ignore these media sources for media inhibit (case-insensitive)
+  #media_blacklist ["spotify"]
 
-  # enable notifications when Stasis unpauses from 
-  # `stasis pause for <DURATION>`
-  #  or
-  #  `stasis pause until <TIME>`
-  # run stasis pause help for more information
+  # Debounce window in seconds before starting the plan (default 0)
+  #debounce_seconds 4
+
+  # Notify when resuming from IPC pause (e.g., `stasis pause 1h`)
   #notify_on_unpause true
 
-  # notifications before actions are run [DEFAULT: false]
-  # You must also set `notification` in the block you want it in
-  # e.g.
-  #   lock-screen:
-  #   ...
-  #   notification: "Locking session in 10s"
-  #   end
-  #
-  #notify-before-command true
+  # Global gate: notifications before steps only happen if this is true
+  #notify_before_action true
 
-  # number of seconds before a command this should notify [DEFAULT: 0]
-  # specify the number of seconds this will trigger a
-  # notification before running your desired blocks.
-  # 
-  # NOTE: This is also ontop of any configured debounce
-  # so if you have 10s timeout + 5s debounce + notify 10s before
-  # it would -> 10s timeout -> 5s debounce -> notify then wait 10s -> run your action block!
-  # super complex stuff here reaching desktop level complexity for Wayland!
-  #notify-seconds-before 10
-
+  # App/process inhibit patterns (strings or regex literals)
   inhibit_apps [
     "vlc"
     "mpv"
     r"steam_app_.*"
   ]
-  
+
   lock_screen:
     timeout 300 # 5 minute(s)
     command "swaylock"
+
+    # Optional per-step notification:
+    #notification "Locking in 10s"
+    #notify_seconds_before 10
+
+    # Optional loginctl integration for lock step only:
+    #use_loginctl true
   end
-  
+
   dpms:
     timeout 60 # 1 minute(s) after lock
     command "niri msg action power-off-monitors"
-    resume-command "niri msg action power-on-monitors"
+    resume_command "niri msg action power-on-monitors"
   end
-  
+
   suspend:
     timeout 1800 # 30 minute(s) after dpms
     command "systemctl suspend"
@@ -254,4 +205,3 @@ end
     .trim_start()
     .to_string()
 }
-

@@ -1,78 +1,48 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
+// Author: Dustin Pilgrim
+// License: MIT
 
-use crate::core::manager::Manager;
-use crate::core::manager::helpers::{current_profile, list_profiles};
+use tokio::sync::{mpsc, oneshot};
 
-pub const LIST_HELP_MESSAGE: &str = r#"List various items in Stasis
+use crate::core::manager_msg::{ListKind, ManagerMsg};
 
-Usage:
-  stasis list actions   List available actions based on current config
-  stasis list profiles  List available configuration profiles
-
-Examples:
+pub const LIST_HELP_MESSAGE: &str = r#"Usage:
   stasis list actions
-  stasis list profiles"#;
+  stasis list profiles
 
-pub async fn handle_list_command(
-    manager: Arc<Mutex<Manager>>,
-    args: &str,
-) -> Result<String, String> {
-    let args = args.trim();
-    
-    if args.eq_ignore_ascii_case("help") || args == "-h" || args == "--help" || args.is_empty() {
-        return Err(LIST_HELP_MESSAGE.to_string());
+Notes:
+  - `actions` shows the currently effective plan (profile + power source).
+  - `profiles` shows all configured profile names you can switch to.
+"#;
+
+pub async fn handle_list(args: &str, tx: &mpsc::Sender<ManagerMsg>) -> String {
+    let a = args.trim();
+
+    if a.is_empty() || a.eq_ignore_ascii_case("help") || a == "-h" || a == "--help" {
+        return LIST_HELP_MESSAGE.to_string();
     }
 
-    match args {
-        "actions" => handle_list_actions(manager).await,
-        "profiles" => handle_list_profiles(manager).await,
-        _ => Err(format!(
-            "Unknown list subcommand: '{}'\n\n{}",
-            args,
-            LIST_HELP_MESSAGE
-        )),
-    }
-}
+    let sub = a.split_whitespace().next().unwrap_or("");
 
-async fn handle_list_actions(manager: Arc<Mutex<Manager>>) -> Result<String, String> {
-    let mgr = manager.lock().await;
-    let actions = mgr.state.get_active_actions();
-    
-    if actions.is_empty() {
-        return Ok("No actions available".to_string());
-    }
-    
-    let action_names: Vec<String> = actions
-        .iter()
-        .map(|a| a.name.clone())
-        .collect();
-    
-    Ok(action_names.join(", "))
-}
+    let kind = match sub {
+        "actions" => ListKind::Actions,
+        "profiles" => ListKind::Profiles,
+        "help" | "-h" | "--help" => return LIST_HELP_MESSAGE.to_string(),
+        _ => return format!("ERROR: unknown list subcommand '{sub}'\n\n{LIST_HELP_MESSAGE}"),
+    };
 
-async fn handle_list_profiles(manager: Arc<Mutex<Manager>>) -> Result<String, String> {
-    let mut mgr = manager.lock().await;
-    let profiles = list_profiles(&mut mgr);
-    
-    if profiles.is_empty() {
-        return Ok("No profiles defined".to_string());
+    let (reply_tx, reply_rx) = oneshot::channel();
+
+    if tx
+        .send(ManagerMsg::List { kind, reply: reply_tx })
+        .await
+        .is_err()
+    {
+        return "ERROR: daemon event channel closed".to_string();
     }
-    
-    let current = current_profile(&mut mgr);
-    let mut response = String::from("Available profiles:\n");
-    
-    for profile_name in profiles {
-        if Some(&profile_name) == current.as_ref() {
-            response.push_str(&format!("  * {} (active)\n", profile_name));
-        } else {
-            response.push_str(&format!("  - {}\n", profile_name));
-        }
+
+    match reply_rx.await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => format!("ERROR: {e}"),
+        Err(_) => "ERROR: daemon list channel closed".to_string(),
     }
-    
-    if current.is_none() {
-        response.push_str("\nCurrently using base configuration");
-    }
-    
-    Ok(response)
 }

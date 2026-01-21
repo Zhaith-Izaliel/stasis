@@ -1,403 +1,313 @@
-use std::{
-    sync::Arc,
-    time::Duration,
-};
-use tokio::time::sleep;
-use tokio::sync::Mutex;
-use chrono::{Local, NaiveTime, Timelike};
+// Author: Dustin Pilgrim
+// License: MIT
 
-use crate::core::manager::Manager;
-use eventline::{event_info_scoped, event_error_scoped};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
-pub const PAUSE_HELP_MESSAGE: &str = r#"Pause all timers indefinitely or for a specific duration/time
+use tokio::sync::mpsc;
 
-Usage: 
-  stasis pause                  Pause indefinitely until 'resume' is called
-  stasis pause for <DURATION>   Pause for a specific duration, then auto-resume
-  stasis pause until <TIME>     Pause until a specific time, then auto-resume
+use crate::core::events::Event;
+use crate::core::manager_msg::ManagerMsg;
 
-Duration format:
-  You can specify durations using combinations of:
-    - s, sec, seconds (e.g., 30s)
-    - m, min, minutes (e.g., 5m)
-    - h, hr, hours    (e.g., 2h)
+// Any new pause/resume bumps this generation, so old scheduled resumes become no-ops.
+static PAUSE_GEN: AtomicU64 = AtomicU64::new(1);
 
-Time format (12-hour):
-  - 1:30pm, 1:30 pm, 1:30PM
-  - 130pm, 130 pm
-  - 1pm, 1 pm
-
-Time format (24-hour):
-  - 13:30, 13:00
-  - 1330, 1300
-  - 13
+pub const PAUSE_HELP_MESSAGE: &str = r#"Usage:
+  stasis pause
+  stasis pause for <duration>
+  stasis pause until <time>
 
 Examples:
-  stasis pause                  Pause indefinitely
-  stasis pause for 5m           Pause for 5 minutes
-  stasis pause for 1h 30m       Pause for 1 hour and 30 minutes
-  stasis pause for 2h 15m 30s   Pause for 2 hours, 15 minutes, and 30 seconds
-  stasis pause until 1:30pm     Pause until 1:30 PM today
-  stasis pause until 130pm      Pause until 1:30 PM today
-  stasis pause until 13:30      Pause until 13:30 (1:30 PM) today
-  stasis pause until 1330       Pause until 13:30 (1:30 PM) today
+  stasis pause
+  stasis pause for 5m
+  stasis pause for 1h30m
+  stasis pause for 250ms
+  stasis pause until 1:30pm
+  stasis pause until 13:30
 
-Use 'stasis resume' to manually resume before the timer expires."#;
+Duration format:
+  - a sequence of <number><unit> parts, like: 1h30m, 5m, 10s, 250ms
+  - units: ms, s, m, h, d
 
-/// Parse a duration string like "5m", "1h", "30s", or "1h 30m 15s"
-fn parse_duration(s: &str) -> Result<Duration, String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return Err("Duration must be greater than 0".to_string());
+Notes:
+  - `pause` with no args pauses until you run `stasis resume`.
+  - `pause for/until` schedules an automatic resume in the daemon.
+"#;
+
+pub async fn handle_pause(args: &str, tx: &mpsc::Sender<ManagerMsg>) -> String {
+    let args = args.trim();
+
+    // Match old behavior: `pause help` prints usage.
+    if args.eq_ignore_ascii_case("help") || args == "-h" || args == "--help" {
+        return PAUSE_HELP_MESSAGE.to_string();
     }
 
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    let mut total_secs = 0u64;
+    // Always pause first.
+    let now_ms = crate::core::utils::now_ms();
+    if tx
+        .send(ManagerMsg::Event(Event::ManualPause { now_ms }))
+        .await
+        .is_err()
+    {
+        return "ERROR: daemon event channel closed".to_string();
+    }
 
-    for part in parts {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
+    // No args => indefinite pause until manual resume.
+    if args.is_empty() {
+        // Invalidate any previous scheduled resumes (since user explicitly paused again).
+        PAUSE_GEN.fetch_add(1, Ordering::SeqCst);
+        return "Idle timers paused".to_string();
+    }
+
+    // Parse: "for ..." | "until ..."
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    let (mode, rest) = match parts.as_slice() {
+        ["for", rest @ ..] if !rest.is_empty() => ("for", rest.join(" ")),
+        ["until", rest @ ..] if !rest.is_empty() => ("until", rest.join(" ")),
+        _ => {
+            return format!("ERROR: invalid pause syntax\n\n{}", PAUSE_HELP_MESSAGE);
+        }
+    };
+
+    // Compute delay for auto-resume.
+    let delay = match mode {
+        "for" => match parse_duration(rest.trim()) {
+            Ok(d) => d,
+            Err(e) => return format!("ERROR: {e}\n\n{}", PAUSE_HELP_MESSAGE),
+        },
+        "until" => match parse_until_local_time(rest.trim()) {
+            Ok(d) => d,
+            Err(e) => return format!("ERROR: {e}\n\n{}", PAUSE_HELP_MESSAGE),
+        },
+        _ => unreachable!(),
+    };
+
+    // Human-facing message for the notification when the pause expires.
+    // (Manager will emit this if notify_on_unpause=true)
+    let notify_message: String = match mode {
+        "for" => format!("Resume idle manager after {} pause", rest.trim()),
+        "until" => format!(
+            "Resume idle manager: pause-until time reached ({})",
+            rest.trim()
+        ),
+        _ => "Resume idle manager".to_string(),
+    };
+
+    // If delay is zero-ish, resume immediately (still goes through daemon state machine).
+    // Also: bump generation so only this scheduled resume is valid.
+    let my_gen = PAUSE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+
+    {
+        let tx2 = tx.clone();
+        let msg2 = notify_message.clone();
+        tokio::spawn(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+
+            // Only resume if we're still the latest scheduled pause/resume intent.
+            if PAUSE_GEN.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
+
+            let now_ms = crate::core::utils::now_ms();
+            let _ = tx2
+                .send(ManagerMsg::Event(Event::PauseExpired {
+                    now_ms,
+                    message: msg2,
+                }))
+                .await;
+        });
+    }
+
+    match mode {
+        "for" => format!("Idle timers paused for {}", rest.trim()),
+        "until" => format!("Idle timers paused until {}", rest.trim()),
+        _ => "Idle timers paused".to_string(),
+    }
+}
+
+pub async fn handle_resume(tx: &mpsc::Sender<ManagerMsg>) -> String {
+    // Invalidate any pending scheduled resumes.
+    PAUSE_GEN.fetch_add(1, Ordering::SeqCst);
+
+    let now_ms = crate::core::utils::now_ms();
+    if tx
+        .send(ManagerMsg::Event(Event::ManualResume { now_ms }))
+        .await
+        .is_err()
+    {
+        return "ERROR: daemon event channel closed".to_string();
+    }
+    "Idle timers resumed".to_string()
+}
+
+// ---------------- parsing ----------------
+
+fn parse_duration(s: &str) -> Result<Duration, String> {
+    // Accept "1h30m", "5m", "10s", "250ms", "1d2h3m4s"
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("missing duration after 'for'".into());
+    }
+
+    let mut i = 0usize;
+    let bytes = s.as_bytes();
+    let mut total_ms: u128 = 0;
+
+    while i < bytes.len() {
+        // skip whitespace
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
         }
 
-        // Find where the number ends and unit begins
-        let split_pos = part
-            .chars()
-            .position(|c| !c.is_ascii_digit())
-            .ok_or_else(|| format!("Invalid duration format: '{}' (missing unit)", part))?;
-
-        let (num_str, unit) = part.split_at(split_pos);
-        let num: u64 = num_str
+        // parse number
+        let start_num = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if start_num == i {
+            return Err(format!("Duration format: expected number at '{}'", &s[i..]));
+        }
+        let n: u128 = s[start_num..i]
             .parse()
-            .map_err(|_| format!("Invalid number: '{}'", num_str))?;
+            .map_err(|_| "Duration format: invalid number".to_string())?;
 
-        let multiplier = match unit.to_lowercase().as_str() {
-            "s" | "sec" | "secs" | "second" | "seconds" => 1,
-            "m" | "min" | "mins" | "minute" | "minutes" => 60,
-            "h" | "hr" | "hrs" | "hour" | "hours" => 3600,
-            _ => return Err(format!("Unknown time unit: '{}' (use s, m, or h)", unit)),
+        // parse unit (ms|s|m|h|d)
+        let start_unit = i;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        if start_unit == i {
+            return Err("Duration format: missing unit (ms/s/m/h/d)".into());
+        }
+        let unit = &s[start_unit..i].to_ascii_lowercase();
+
+        let add_ms: u128 = match unit.as_str() {
+            "ms" => n,
+            "s" => n * 1000,
+            "m" => n * 60 * 1000,
+            "h" => n * 60 * 60 * 1000,
+            "d" => n * 24 * 60 * 60 * 1000,
+            _ => return Err(format!("Duration format: unknown unit '{unit}' (ms/s/m/h/d)")),
         };
 
-        total_secs += num * multiplier;
+        total_ms = total_ms
+            .checked_add(add_ms)
+            .ok_or_else(|| "Duration too large".to_string())?;
     }
 
-    if total_secs == 0 {
-        return Err("Duration must be greater than 0".to_string());
-    }
-
-    Ok(Duration::from_secs(total_secs))
+    Ok(Duration::from_millis(
+        u64::try_from(total_ms).map_err(|_| "Duration too large".to_string())?,
+    ))
 }
 
-/// Parse a time string and return duration until that time
-/// Supports formats like: 1:30pm, 130pm, 1pm, 13:30, 1330, 13
-fn parse_time_until(s: &str) -> Result<Duration, String> {
-    let s = s.trim().to_lowercase().replace(" ", "");
-    
-    // Check for AM/PM
-    let (time_str, is_pm) = if s.ends_with("pm") {
-        (s.trim_end_matches("pm"), true)
-    } else if s.ends_with("am") {
-        (s.trim_end_matches("am"), false)
+fn parse_until_local_time(s: &str) -> Result<Duration, String> {
+    // Accept:
+    //  - "13:30"
+    //  - "1:30pm" / "1:30 pm"
+    //  - "1pm" / "1 pm"
+    let raw = s.trim();
+    if raw.is_empty() {
+        return Err("missing time after 'until'".into());
+    }
+
+    let mut t = raw.to_ascii_lowercase();
+    t.retain(|c| !c.is_whitespace());
+
+    let (is_pm, is_am, t) = if let Some(x) = t.strip_suffix("pm") {
+        (true, false, x.to_string())
+    } else if let Some(x) = t.strip_suffix("am") {
+        (false, true, x.to_string())
     } else {
-        (s.as_str(), false) // Assume 24-hour format
+        (false, false, t)
     };
 
-    // Parse the time
-    let (hour, minute) = if time_str.contains(':') {
-        // Format: 1:30, 13:30
-        let parts: Vec<&str> = time_str.split(':').collect();
-        if parts.len() != 2 {
-            return Err(format!("Invalid time format: '{}' (use HH:MM or H:MM)", s));
-        }
-        let h: u32 = parts[0].parse()
-            .map_err(|_| format!("Invalid hour: '{}'", parts[0]))?;
-        let m: u32 = parts[1].parse()
-            .map_err(|_| format!("Invalid minute: '{}'", parts[1]))?;
+    let (hour, min) = if let Some((hh, mm)) = t.split_once(':') {
+        let h: i32 = hh.parse().map_err(|_| "Invalid time (hour)".to_string())?;
+        let m: i32 = mm.parse().map_err(|_| "Invalid time (minute)".to_string())?;
         (h, m)
     } else {
-        // Format: 130, 1330, 1, 13
-        let num: u32 = time_str.parse()
-            .map_err(|_| format!("Invalid time format: '{}'", s))?;
-        
-        if num >= 100 {
-            // 130 -> 1:30, 1330 -> 13:30
-            let h = num / 100;
-            let m = num % 100;
-            (h, m)
-        } else {
-            // 1 -> 1:00, 13 -> 13:00
-            (num, 0)
-        }
+        // "1pm" style
+        let h: i32 = t.parse().map_err(|_| "Invalid time".to_string())?;
+        (h, 0)
     };
 
-    // Convert to 24-hour format if PM
-    let hour_24 = if is_pm && hour < 12 {
-        hour + 12
-    } else if !is_pm && hour == 12 {
-        0 // 12am = 00:00
+    if min < 0 || min > 59 {
+        return Err("Invalid time: minute must be 0..59".into());
+    }
+
+    let mut hour = hour;
+
+    if is_am || is_pm {
+        // 12-hour clock
+        if hour < 1 || hour > 12 {
+            return Err("Invalid time: hour must be 1..12 for am/pm".into());
+        }
+        if is_pm && hour != 12 {
+            hour += 12;
+        }
+        if is_am && hour == 12 {
+            hour = 0;
+        }
     } else {
-        hour
-    };
-
-    // Validate
-    if hour_24 >= 24 {
-        return Err(format!("Invalid hour: {} (must be 0-23)", hour_24));
-    }
-    if minute >= 60 {
-        return Err(format!("Invalid minute: {} (must be 0-59)", minute));
+        // 24-hour clock
+        if hour < 0 || hour > 23 {
+            return Err("Invalid time: hour must be 0..23".into());
+        }
     }
 
-    // Get target time
-    let target_time = NaiveTime::from_hms_opt(hour_24, minute, 0)
-        .ok_or_else(|| format!("Invalid time: {}:{:02}", hour_24, minute))?;
+    // Compute next occurrence of that local time using libc (no chrono dependency).
+    unsafe {
+        use libc::{localtime_r, mktime, time_t, tm};
 
-    // Get current time
-    let now = Local::now();
-    let current_time = now.time();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "System time before UNIX_EPOCH".to_string())?;
+        let now_secs_u64 = now.as_secs();
 
-    // Calculate duration until target time
-    let duration = if target_time > current_time {
-        // Target is later today
-        let secs = (target_time.num_seconds_from_midnight() - current_time.num_seconds_from_midnight()) as u64;
-        Duration::from_secs(secs)
-    } else {
-        // Target is tomorrow (already passed today)
-        let secs_until_midnight = (86400 - current_time.num_seconds_from_midnight()) as u64;
-        let secs_from_midnight = target_time.num_seconds_from_midnight() as u64;
-        Duration::from_secs(secs_until_midnight + secs_from_midnight)
-    };
+        let now_tt: time_t = now_secs_u64 as time_t;
 
-    Ok(duration)
-}
+        let mut now_tm: tm = std::mem::zeroed();
+        if localtime_r(&now_tt as *const time_t, &mut now_tm as *mut tm).is_null() {
+            return Err("Failed to read local time".into());
+        }
 
-/// Format a duration into a human-readable string
-fn format_duration_readable(duration: Duration) -> String {
-    let secs = duration.as_secs();
-    let hours = secs / 3600;
-    let mins = (secs % 3600) / 60;
-    let remaining_secs = secs % 60;
+        // Build a tm for "today at target HH:MM:00"
+        let mut target_tm = now_tm;
+        target_tm.tm_hour = hour;
+        target_tm.tm_min = min;
+        target_tm.tm_sec = 0;
+        target_tm.tm_isdst = -1; // let libc determine DST
 
-    if hours > 0 && mins > 0 && remaining_secs > 0 {
-        format!("{}h {}m {}s", hours, mins, remaining_secs)
-    } else if hours > 0 && mins > 0 {
-        format!("{}h {}m", hours, mins)
-    } else if hours > 0 && remaining_secs > 0 {
-        format!("{}h {}s", hours, remaining_secs)
-    } else if mins > 0 && remaining_secs > 0 {
-        format!("{}m {}s", mins, remaining_secs)
-    } else if hours > 0 {
-        format!("{}h", hours)
-    } else if mins > 0 {
-        format!("{}m", mins)
-    } else {
-        format!("{}s", remaining_secs)
-    }
-}
+        let mut target_tt = mktime(&mut target_tm as *mut tm);
+        if target_tt == -1 {
+            return Err("Invalid time (mktime failed)".into());
+        }
 
-/// Pause the manager for a specific duration, then automatically resume
-async fn pause_for_duration(
-    manager: Arc<Mutex<Manager>>,
-    duration: Duration,
-    reason: String,
-    notification_msg: String,
-) -> Result<String, String> {
-    // Pause immediately
-    {
-        let mut mgr = manager.lock().await;
-        mgr.pause(true).await;
-    }
+        // If target <= now, schedule for tomorrow.
+        if (target_tt as i64) <= (now_tt as i64) {
+            let mut tomorrow_tm = now_tm;
+            tomorrow_tm.tm_mday += 1;
+            tomorrow_tm.tm_hour = hour;
+            tomorrow_tm.tm_min = min;
+            tomorrow_tm.tm_sec = 0;
+            tomorrow_tm.tm_isdst = -1;
 
-    // Clone reason for logging before passing to macro
-    let reason_for_log = reason.clone();
-    event_info_scoped!("Stasis", "Idle manager paused {}", reason_for_log);
-
-    // Clone again for the async task
-    let reason_for_task = reason.clone();
-    let notification_for_task = notification_msg.clone();
-    let manager_clone = manager.clone();
-
-    // Spawn a task to auto-resume after the duration
-    tokio::spawn(async move {
-        sleep(duration).await;
-
-        let mut mgr = manager_clone.lock().await;
-
-        if mgr.state.inhibitors.manually_paused {
-            mgr.state.inhibitors.manually_paused = false;
-
-            // Determine if we should notify
-            let should_notify = mgr.state.cfg.as_ref().map(|cfg| cfg.notify_on_unpause).unwrap_or(false);
-            let active_inhibitors = mgr.state.inhibitors.active_inhibitor_count;
-
-            if active_inhibitors == 0 {
-                mgr.state.inhibitors.paused = false;
-
-                // Fresh clone for macro
-                let reason_clone = reason_for_task.clone();
-                event_info_scoped!("Stasis", "Auto-resuming after {}", reason_clone);
-
-                if should_notify {
-                    send_notification("Stasis resumed", &notification_for_task).await;
-                }
-            } else {
-                // Fresh clone for macro
-                let reason_clone = reason_for_task.clone();
-                event_info_scoped!(
-                    "Stasis",
-                    "Auto-resume timer expired after {} but {} inhibitor(s) still active",
-                    reason_clone,
-                    active_inhibitors
-                );
-
-                if should_notify {
-                    let inhibitor_word = if active_inhibitors == 1 { "inhibitor" } else { "inhibitors" };
-                    send_notification(
-                        "Stasis - manual pause expired",
-                        &format!(
-                            "Manual pause timer expired, but {} {} still active. Timers remain paused.",
-                            active_inhibitors,
-                            inhibitor_word
-                        )
-                    ).await;
-                }
+            target_tt = mktime(&mut tomorrow_tm as *mut tm);
+            if target_tt == -1 {
+                return Err("Invalid time (mktime failed)".into());
             }
         }
-    });
 
-    Ok(format!("Paused {}", reason))
-}
-
-/// Handle pause command with various formats
-pub async fn handle_pause_command(
-    manager: Arc<Mutex<Manager>>,
-    args: &str,
-) -> Result<String, String> {
-    let args = args.trim();
-    
-    // Check for help
-    if args.eq_ignore_ascii_case("help") || args == "-h" || args == "--help" {
-        return Err(PAUSE_HELP_MESSAGE.to_string());
-    }
-
-    // No args = indefinite pause
-    if args.is_empty() {
-        let mut mgr = manager.lock().await;
-        mgr.pause(true).await;
-        return Ok("Idle manager paused indefinitely".to_string());
-    }
-
-    // Parse "for" or "until"
-    if let Some(duration_str) = args.strip_prefix("for ").or_else(|| args.strip_prefix("for")) {
-        let duration_str = duration_str.trim();
-        if duration_str.is_empty() {
-            return Err("Missing duration after 'for' (e.g., 'pause for 5m')".to_string());
+        let delta_secs = (target_tt as i64) - (now_tt as i64);
+        if delta_secs <= 0 {
+            return Ok(Duration::from_millis(0));
         }
-        
-        let duration = parse_duration(duration_str)?;
-        let notification = format!("Timers resumed after {} pause", format_duration_readable(duration));
-        pause_for_duration(manager, duration, format!("for {}", format_duration_readable(duration)), notification).await
-    } else if let Some(time_str) = args.strip_prefix("until ").or_else(|| args.strip_prefix("until")) {
-        let time_str = time_str.trim();
-        if time_str.is_empty() {
-            return Err("Missing time after 'until' (e.g., 'pause until 1:30pm')".to_string());
-        }
-        
-        let duration = parse_time_until(time_str)?;
-        let formatted_time = format_duration_readable(duration);
-        
-        // Format the target time for display
-        let display_time = format!("until {} (in {})", time_str, formatted_time);
-        let notification = format!("Timers resumed (paused until {})", time_str);
-        pause_for_duration(manager, duration, display_time, notification).await
-    } else {
-        // Legacy support: try parsing as duration without "for"
-        match parse_duration(args) {
-            Ok(duration) => {
-                let notification = format!("Timers resumed after {} pause", format_duration_readable(duration));
-                pause_for_duration(manager, duration, format!("for {}", format_duration_readable(duration)), notification).await
-            }
-            Err(_) => {
-                Err(format!(
-                    "Invalid pause format. Use:\n  \
-                    'pause' (indefinite)\n  \
-                    'pause for <duration>' (e.g., 'pause for 5m')\n  \
-                    'pause until <time>' (e.g., 'pause until 1:30pm')\n\n\
-                    For more help: 'stasis pause help'"
-                ))
-            }
-        }
-    }
-}
 
-async fn send_notification(summary: &str, body: &str) {
-    if let Err(e) = tokio::process::Command::new("notify-send")
-        .arg("-a")
-        .arg("stasis")
-        .arg(summary)
-        .arg(body)
-        .spawn()
-    {
-        event_error_scoped!("Stasis", "Failed to send notification: {}", e);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_duration() {
-        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
-        assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-        assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-        assert_eq!(parse_duration("1h 30m").unwrap(), Duration::from_secs(5400));
-        assert_eq!(parse_duration("1h 30m 15s").unwrap(), Duration::from_secs(5415));
-        assert_eq!(parse_duration("2h 15s").unwrap(), Duration::from_secs(7215));
-        
-        // Test various unit formats
-        assert_eq!(parse_duration("5mins").unwrap(), Duration::from_secs(300));
-        assert_eq!(parse_duration("1hour").unwrap(), Duration::from_secs(3600));
-        assert_eq!(parse_duration("30seconds").unwrap(), Duration::from_secs(30));
-        
-        // Test errors
-        assert!(parse_duration("").is_err());
-        assert!(parse_duration("5").is_err());
-        assert!(parse_duration("5x").is_err());
-        assert!(parse_duration("0m").is_err());
-    }
-
-    #[test]
-    fn test_parse_time_until() {
-        // Note: These tests will vary based on current time
-        // Just verify they parse without errors and return reasonable durations
-        
-        // 12-hour formats
-        assert!(parse_time_until("1:30pm").is_ok());
-        assert!(parse_time_until("1:30 pm").is_ok());
-        assert!(parse_time_until("130pm").is_ok());
-        assert!(parse_time_until("1pm").is_ok());
-        
-        // 24-hour formats
-        assert!(parse_time_until("13:30").is_ok());
-        assert!(parse_time_until("1330").is_ok());
-        assert!(parse_time_until("13").is_ok());
-        
-        // Edge cases
-        assert!(parse_time_until("12am").is_ok()); // Midnight
-        assert!(parse_time_until("12pm").is_ok()); // Noon
-        
-        // Errors
-        assert!(parse_time_until("25:00").is_err()); // Invalid hour
-        assert!(parse_time_until("12:60").is_err()); // Invalid minute
-        assert!(parse_time_until("abc").is_err()); // Invalid format
-    }
-
-    #[test]
-    fn test_format_duration_readable() {
-        assert_eq!(format_duration_readable(Duration::from_secs(300)), "5m");
-        assert_eq!(format_duration_readable(Duration::from_secs(3600)), "1h");
-        assert_eq!(format_duration_readable(Duration::from_secs(5400)), "1h 30m");
-        assert_eq!(format_duration_readable(Duration::from_secs(5415)), "1h 30m 15s");
-        assert_eq!(format_duration_readable(Duration::from_secs(30)), "30s");
+        Ok(Duration::from_secs(delta_secs as u64))
     }
 }

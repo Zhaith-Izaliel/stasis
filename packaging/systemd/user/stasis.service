@@ -1,0 +1,17 @@
+[Unit]
+Description=Stasis Wayland Idle Manager
+Documentation=man:stasis(1)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/stasis
+
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Install]
+WantedBy=graphical-session.target

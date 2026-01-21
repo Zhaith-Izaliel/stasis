@@ -1,42 +1,88 @@
-use std::time::Duration;
+// Author: Dustin Pilgrim
+// License: MIT
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub fn now_ms() -> u64 {
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0));
+    d.as_millis() as u64
+}
+
+pub fn run_shell_command_silent(cmd: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::{Command, Stdio};
+
+    Command::new("sh")
+        .arg("-lc")
+        .arg(cmd)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
+pub fn escape_single_quotes(s: &str) -> String {
+    s.replace('\'', r#"'"'"'"#)
+}
+
+// ---------------- power / chassis ----------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChassisKind {
     Laptop,
     Desktop,
 }
 
 pub fn detect_chassis() -> ChassisKind {
-    // Try reading from sysfs
     if let Ok(data) = std::fs::read_to_string("/sys/class/dmi/id/chassis_type") {
-        let laptop_chassis = vec![
-            "8",  // Portable
-            "9",  // Laptop
-            "10", // Notebook
-            "14", // Sub Notebook
-            "30", // Tablet
-            "31", // Convertible
-            "32", // Detachable
-        ];
-        if laptop_chassis.contains(&data.trim()) {
-            return ChassisKind::Laptop;
+        match data.trim() {
+            // Portable / Laptop / Notebook / Convertible / Tablet
+            "8" | "9" | "10" | "14" | "30" | "31" | "32" => {
+                return ChassisKind::Laptop;
+            }
+            _ => {}
         }
     }
 
     ChassisKind::Desktop
 }
 
-pub fn format_duration(dur: Duration) -> String {
-    let secs = dur.as_secs();
+pub fn is_laptop() -> bool {
+    matches!(detect_chassis(), ChassisKind::Laptop)
+}
 
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        let minutes = secs / 60;
-        let seconds = secs % 60;
-        format!("{}m {}s", minutes, seconds)
-    } else {
-        let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        format!("{}h {}m", hours, minutes)
+pub fn is_on_ac_power() -> bool {
+    if let Ok(entries) = std::fs::read_dir("/sys/class/power_supply/") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            // Standard sysfs way
+            if let Ok(typ) = std::fs::read_to_string(path.join("type")) {
+                if typ.trim() == "Mains" {
+                    if let Ok(online) = std::fs::read_to_string(path.join("online")) {
+                        if online.trim() == "1" {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // Legacy fallbacks
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if ["AC", "AC0", "ADP", "ADP0", "ACAD"]
+                    .iter()
+                    .any(|p| name.starts_with(p))
+                {
+                    if let Ok(online) = std::fs::read_to_string(path.join("online")) {
+                        if online.trim() == "1" {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    false
 }

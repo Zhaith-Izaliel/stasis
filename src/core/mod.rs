@@ -1,4 +1,15 @@
+// Author: Dustin Pilgrim
+// License: MIT
+
+pub mod action;
+pub mod config;
+pub mod error;
 pub mod events;
+pub mod info;
 pub mod manager;
-pub mod services;
+pub mod manager_msg;
+pub mod state;
 pub mod utils;
+
+#[cfg(test)]
+mod manager_tests;
