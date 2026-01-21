@@ -19,7 +19,7 @@ impl Manager {
         state.ensure_plan_len(cfg.plan.len());
         state.set_debounce_seconds(cfg.debounce_seconds);
 
-        self.refresh_paused(state);
+        self.refresh_paused(state, now_ms);
 
         let mut out = Vec::new();
 
@@ -47,7 +47,7 @@ impl Manager {
                     let post_lock_start = self.first_enabled_step_after_lock(&cfg);
                     state.restart_post_lock_segment(now_ms, post_lock_start);
 
-                    self.refresh_paused(state);
+                    self.refresh_paused(state, now_ms);
 
                     if cfg.notify_on_unpause && was_paused && !state.paused() {
                         out.push(Action::Notify {
@@ -59,7 +59,7 @@ impl Manager {
                 }
 
                 state.reset_idle_cycle(now_ms);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
 
                 self.sync_step_index_after_startup_instants(state, &cfg);
 
@@ -77,7 +77,7 @@ impl Manager {
                     return Err(Error::InvalidState(StateError::AlreadyPaused));
                 }
                 state.set_manually_paused(true);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::ManualResume { .. } => {
@@ -89,7 +89,7 @@ impl Manager {
                 out.extend(self.resume_commands_for_activity(state, &cfg));
                 state.reset_idle_cycle(now_ms);
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
                 self.sync_step_index_after_startup_instants(state, &cfg);
 
                 self.advance_past_lock_if_needed(state, &cfg);
@@ -102,7 +102,7 @@ impl Manager {
                     out.extend(self.resume_commands_for_activity(state, &cfg));
                     state.reset_idle_cycle(now_ms);
 
-                    self.refresh_paused(state);
+                    self.refresh_paused(state, now_ms);
                     self.sync_step_index_after_startup_instants(state, &cfg);
 
                     if cfg.notify_on_unpause {
@@ -200,7 +200,7 @@ impl Manager {
                     out.extend(self.resume_commands_for_activity(state, &cfg));
                     state.reset_idle_cycle(now_ms);
 
-                    self.refresh_paused(state);
+                    self.refresh_paused(state, now_ms);
                     self.sync_step_index_after_startup_instants(state, &cfg);
 
                     self.advance_past_lock_if_needed(state, &cfg);
@@ -209,7 +209,7 @@ impl Manager {
 
             Event::PrepareForSleep { .. } => {
                 state.set_system_paused(true);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::ResumedFromSleep { .. } => {
@@ -226,12 +226,12 @@ impl Manager {
                     self.sync_step_index_after_startup_instants(state, &cfg);
                 }
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::LidClosed { .. } => {
                 state.set_system_paused(true);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::LidOpened { .. } => {
@@ -248,7 +248,7 @@ impl Manager {
                     self.sync_step_index_after_startup_instants(state, &cfg);
                 }
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::ProfileChanged { name, .. } => {
@@ -274,7 +274,7 @@ impl Manager {
 
                 state.set_app_inhibitor_count(0);
                 state.set_media_inhibitor_count(0);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
 
                 state.reset_idle_cycle(now_ms);
                 state.clear_one_shots();
@@ -283,7 +283,7 @@ impl Manager {
                 state.ensure_plan_len(cfg.plan.len());
                 state.set_debounce_seconds(cfg.debounce_seconds);
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
                 self.sync_step_index_after_startup_instants(state, &cfg);
                 self.advance_past_lock_if_needed(state, &cfg);
 
@@ -307,7 +307,7 @@ impl Manager {
                 state.ensure_plan_len(cfg.plan.len());
                 state.set_debounce_seconds(cfg.debounce_seconds);
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
                 self.sync_step_index_after_startup_instants(state, &cfg);
                 self.advance_past_lock_if_needed(state, &cfg);
 
@@ -317,19 +317,19 @@ impl Manager {
 
             Event::AppInhibitorCount { count, .. } => {
                 state.set_app_inhibitor_count(count);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::MediaInhibitorCount { count, .. } => {
                 state.set_media_inhibitor_count(count);
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
             }
 
             Event::MediaStateChanged { state: m, .. } => {
                 let old = self.last_media;
                 self.last_media = m;
 
-                self.refresh_paused(state);
+                self.refresh_paused(state, now_ms);
 
                 if cfg.notify_on_unpause
                     && matches!(old, MediaState::PlayingLocal | MediaState::PlayingRemote)
@@ -350,9 +350,28 @@ impl Manager {
             .ok_or(Error::InvalidConfig(ConfigError::ProfileNotFound))
     }
 
-    fn refresh_paused(&self, state: &mut State) {
-        let paused = state.manually_paused() || state.inhibitors_active() || state.system_paused();
-        state.set_paused(paused);
+    fn refresh_paused(&self, state: &mut State, now_ms: u64) {
+        let new_paused =
+            state.manually_paused() || state.inhibitors_active() || state.system_paused();
+        let was_paused = state.paused();
+
+        if !was_paused && new_paused {
+            // entering pause
+            state.set_pause_started_ms(Some(now_ms));
+        } else if was_paused && !new_paused {
+            // leaving pause: freeze countdown by shifting base forward
+            if let Some(t0) = state.take_pause_started_ms() {
+                let dt = now_ms.saturating_sub(t0);
+                state.set_step_base_ms(state.step_base_ms().saturating_add(dt));
+
+                // optional: also freeze the notify-wait window if you use it
+                if state.pre_action_notify_sent() {
+                    state.set_pre_action_notify_ms(state.pre_action_notify_ms().saturating_add(dt));
+                }
+            }
+        }
+
+        state.set_paused(new_paused);
     }
 
     pub(super) fn normalize_trigger_name(s: &str) -> String {

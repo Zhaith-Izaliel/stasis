@@ -39,6 +39,7 @@ pub struct State {
 
     // Derived pause (manual OR inhibitors OR system)
     paused: bool,
+    pause_started_ms: Option<u64>,
 
     // Mirrors config; manager copies from effective config each event.
     debounce_seconds: u64,
@@ -97,6 +98,7 @@ impl State {
             manually_paused: false,
             system_paused: false,
             paused: false,
+            pause_started_ms: None,
 
             debounce_seconds: 0,
             debounce_pending: true, // boot behaves like "fresh idle cycle"
@@ -267,6 +269,19 @@ impl State {
         self.one_shots_fired.clear();
     }
 
+    // ---------------- pause timestamp helpers ----------------
+
+
+    /// Set/clear the pause-start timestamp.
+    pub fn set_pause_started_ms(&mut self, v: Option<u64>) {
+        self.pause_started_ms = v;
+    }
+
+    /// Take-and-clear the pause-start timestamp.
+    pub fn take_pause_started_ms(&mut self) -> Option<u64> {
+        self.pause_started_ms.take()
+    }
+
     // ---------------- getters ----------------
 
     pub fn app_inhibitor_count(&self) -> u64 {
@@ -345,6 +360,10 @@ impl State {
 
     pub fn set_paused(&mut self, v: bool) {
         self.paused = v;
+        if !v {
+            // If we are not paused, we should not keep a pause-start timestamp around.
+            self.pause_started_ms = None;
+        }
     }
 
     pub fn set_locked(&mut self, v: bool) {
@@ -409,6 +428,9 @@ impl State {
         self.debounce_pending = true;
 
         self.clear_fired_steps();
+
+        // Reset pause timestamp for a fresh cycle.
+        self.pause_started_ms = None;
     }
 
     /// Restart timers AND rewind to the post-lock start step so the post-lock
@@ -425,6 +447,9 @@ impl State {
         self.debounce_pending = true;
 
         self.clear_fired_steps_from(post_lock_start_idx);
+
+        // Reset pause timestamp for a restarted segment.
+        self.pause_started_ms = None;
     }
 }
 
