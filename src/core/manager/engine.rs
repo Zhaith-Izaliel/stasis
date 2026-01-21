@@ -1,0 +1,776 @@
+// Author: Dustin Pilgrim
+// License: MIT
+
+use crate::core::{
+    action::Action,
+    config::{Config, PlanSource, PlanStep, PlanStepKind},
+    error::{ConfigError, Error, StateError},
+    events::{Event, MediaState, PowerState},
+    state::State,
+};
+
+use super::Manager;
+
+impl Manager {
+    pub fn handle_event(&mut self, state: &mut State, event: Event) -> Result<Vec<Action>, Error> {
+        let now_ms = event.now_ms();
+        let cfg = self.effective_cfg(state)?;
+
+        state.ensure_plan_len(cfg.plan.len());
+        state.set_debounce_seconds(cfg.debounce_seconds);
+
+        self.refresh_paused(state);
+
+        let mut out = Vec::new();
+
+        out.extend(self.maybe_fire_startup_instants(state, &cfg, now_ms));
+        self.sync_step_index_after_startup_instants(state, &cfg);
+
+        match event {
+            Event::Tick { .. } => {
+                if state.paused() {
+                    return Ok(out);
+                }
+
+                self.advance_past_lock_if_needed(state, &cfg);
+                out.extend(self.maybe_fire_next_step(state, &cfg, now_ms));
+            }
+
+            Event::UserActivity { .. } => {
+                let was_paused = state.paused();
+
+                out.extend(self.resume_commands_for_activity(state, &cfg));
+
+                if state.is_locked() {
+                    self.advance_past_lock_if_needed(state, &cfg);
+
+                    let post_lock_start = self.first_enabled_step_after_lock(&cfg);
+                    state.restart_post_lock_segment(now_ms, post_lock_start);
+
+                    self.refresh_paused(state);
+
+                    if cfg.notify_on_unpause && was_paused && !state.paused() {
+                        out.push(Action::Notify {
+                            message: "resumed".to_string(),
+                        });
+                    }
+
+                    return Ok(out);
+                }
+
+                state.reset_idle_cycle(now_ms);
+                self.refresh_paused(state);
+
+                self.sync_step_index_after_startup_instants(state, &cfg);
+
+                if cfg.notify_on_unpause && was_paused && !state.paused() {
+                    out.push(Action::Notify {
+                        message: "resumed".to_string(),
+                    });
+                }
+
+                self.advance_past_lock_if_needed(state, &cfg);
+            }
+
+            Event::ManualPause { .. } => {
+                if state.manually_paused() {
+                    return Err(Error::InvalidState(StateError::AlreadyPaused));
+                }
+                state.set_manually_paused(true);
+                self.refresh_paused(state);
+            }
+
+            Event::ManualResume { .. } => {
+                if !state.manually_paused() {
+                    return Err(Error::InvalidState(StateError::NotPaused));
+                }
+                state.set_manually_paused(false);
+
+                out.extend(self.resume_commands_for_activity(state, &cfg));
+                state.reset_idle_cycle(now_ms);
+
+                self.refresh_paused(state);
+                self.sync_step_index_after_startup_instants(state, &cfg);
+
+                self.advance_past_lock_if_needed(state, &cfg);
+            }
+
+            Event::PauseExpired { message, .. } => {
+                if state.manually_paused() {
+                    state.set_manually_paused(false);
+
+                    out.extend(self.resume_commands_for_activity(state, &cfg));
+                    state.reset_idle_cycle(now_ms);
+
+                    self.refresh_paused(state);
+                    self.sync_step_index_after_startup_instants(state, &cfg);
+
+                    if cfg.notify_on_unpause {
+                        out.push(Action::Notify { message });
+                    }
+
+                    self.advance_past_lock_if_needed(state, &cfg);
+                }
+            }
+
+            Event::ManualTrigger { name, .. } => {
+                let n = Self::normalize_trigger_name(&name);
+
+                if n == "all" {
+                    eventline::info!("trigger: all");
+
+                    let mut emitted_any = false;
+
+                    for (idx, step) in cfg.plan.iter().enumerate() {
+                        if !step.enabled() {
+                            continue;
+                        }
+                        if step.is_instant() {
+                            continue;
+                        }
+                        if Self::is_lock_step(step) && state.is_locked() {
+                            continue;
+                        }
+
+                        let emitted = self.actions_for_plan_step(state, step, &cfg);
+                        if !emitted.is_empty() {
+                            let arms_resume = step.resume_command.is_some();
+                            let is_dpms = Self::is_dpms_group(step);
+                            let is_brightness = Self::is_brightness_group(step);
+                            let is_lock = Self::is_lock_step(step);
+
+                            state.mark_step_fired(idx, is_dpms, is_brightness, is_lock, arms_resume);
+                            emitted_any = true;
+                        }
+
+                        out.extend(emitted);
+                    }
+
+                    if emitted_any {
+                        state.mark_action_fired(now_ms);
+                        state.set_pre_action_notify_sent(false);
+                        state.set_debounce_pending(false);
+                        state.set_step_base_ms(now_ms);
+                        state.set_step_index(cfg.plan.len());
+                    }
+
+                    return Ok(out);
+                }
+
+                if let Some((idx, step)) = self.find_trigger_step(&cfg, &name) {
+                    eventline::info!("trigger: {} -> step_idx={}", name, idx);
+
+                    let emitted = self.actions_for_plan_step(state, step, &cfg);
+                    if !emitted.is_empty() {
+                        let arms_resume = step.resume_command.is_some();
+                        let is_dpms = Self::is_dpms_group(step);
+                        let is_brightness = Self::is_brightness_group(step);
+                        let is_lock = Self::is_lock_step(step);
+
+                        state.mark_step_fired(idx, is_dpms, is_brightness, is_lock, arms_resume);
+                        state.mark_action_fired(now_ms);
+
+                        state.set_step_index(idx + 1);
+                        state.set_step_base_ms(now_ms);
+                        state.set_debounce_pending(false);
+                        state.set_pre_action_notify_sent(false);
+                    }
+
+                    out.extend(emitted);
+                } else {
+                    eventline::warn!("trigger: '{}' not found/enabled in effective config", name);
+                }
+            }
+
+            Event::SessionLocked { .. } => {
+                if !state.is_locked() {
+                    state.set_locked(true);
+                    self.advance_past_lock_if_needed(state, &cfg);
+                }
+            }
+
+            Event::SessionUnlocked { .. } => {
+                if state.is_locked() {
+                    state.set_locked(false);
+
+                    if state.take_resume_deferred_until_unlock() {
+                        state.arm_resume_episode();
+                    }
+
+                    out.extend(self.resume_commands_for_activity(state, &cfg));
+                    state.reset_idle_cycle(now_ms);
+
+                    self.refresh_paused(state);
+                    self.sync_step_index_after_startup_instants(state, &cfg);
+
+                    self.advance_past_lock_if_needed(state, &cfg);
+                }
+            }
+
+            Event::PrepareForSleep { .. } => {
+                state.set_system_paused(true);
+                self.refresh_paused(state);
+            }
+
+            Event::ResumedFromSleep { .. } => {
+                state.set_system_paused(false);
+
+                out.extend(self.resume_commands_for_activity(state, &cfg));
+
+                if state.is_locked() {
+                    self.advance_past_lock_if_needed(state, &cfg);
+                    let post_lock_start = self.first_enabled_step_after_lock(&cfg);
+                    state.restart_post_lock_segment(now_ms, post_lock_start);
+                } else {
+                    state.reset_idle_cycle(now_ms);
+                    self.sync_step_index_after_startup_instants(state, &cfg);
+                }
+
+                self.refresh_paused(state);
+            }
+
+            Event::LidClosed { .. } => {
+                state.set_system_paused(true);
+                self.refresh_paused(state);
+            }
+
+            Event::LidOpened { .. } => {
+                state.set_system_paused(false);
+
+                out.extend(self.resume_commands_for_activity(state, &cfg));
+
+                if state.is_locked() {
+                    self.advance_past_lock_if_needed(state, &cfg);
+                    let post_lock_start = self.first_enabled_step_after_lock(&cfg);
+                    state.restart_post_lock_segment(now_ms, post_lock_start);
+                } else {
+                    state.reset_idle_cycle(now_ms);
+                    self.sync_step_index_after_startup_instants(state, &cfg);
+                }
+
+                self.refresh_paused(state);
+            }
+
+            Event::ProfileChanged { name, .. } => {
+                let raw = name.trim();
+
+                let candidate: Option<String> = if raw.eq_ignore_ascii_case("none") {
+                    None
+                } else if raw.is_empty() {
+                    return Err(Error::InvalidConfig(ConfigError::InvalidProfileName));
+                } else {
+                    Some(raw.to_string())
+                };
+
+                if self
+                    .cfg_file
+                    .effective_for(candidate.as_deref(), state.plan_source())
+                    .is_none()
+                {
+                    return Err(Error::InvalidConfig(ConfigError::ProfileNotFound));
+                }
+
+                state.set_active_profile(candidate);
+
+                state.set_app_inhibitor_count(0);
+                state.set_media_inhibitor_count(0);
+                self.refresh_paused(state);
+
+                state.reset_idle_cycle(now_ms);
+                state.clear_one_shots();
+
+                let cfg = self.effective_cfg(state)?;
+                state.ensure_plan_len(cfg.plan.len());
+                state.set_debounce_seconds(cfg.debounce_seconds);
+
+                self.refresh_paused(state);
+                self.sync_step_index_after_startup_instants(state, &cfg);
+                self.advance_past_lock_if_needed(state, &cfg);
+
+                out.extend(self.maybe_fire_startup_instants(state, &cfg, now_ms));
+                self.sync_step_index_after_startup_instants(state, &cfg);
+            }
+
+            Event::PowerChanged { state: ps, .. } => {
+                state.set_power_state(ps);
+
+                let src = match ps {
+                    PowerState::OnAC => PlanSource::Ac,
+                    PowerState::OnBattery => PlanSource::Battery,
+                };
+                state.set_plan_source(src);
+
+                state.reset_idle_cycle(now_ms);
+                state.clear_one_shots();
+
+                let cfg = self.effective_cfg(state)?;
+                state.ensure_plan_len(cfg.plan.len());
+                state.set_debounce_seconds(cfg.debounce_seconds);
+
+                self.refresh_paused(state);
+                self.sync_step_index_after_startup_instants(state, &cfg);
+                self.advance_past_lock_if_needed(state, &cfg);
+
+                out.extend(self.maybe_fire_startup_instants(state, &cfg, now_ms));
+                self.sync_step_index_after_startup_instants(state, &cfg);
+            }
+
+            Event::AppInhibitorCount { count, .. } => {
+                state.set_app_inhibitor_count(count);
+                self.refresh_paused(state);
+            }
+
+            Event::MediaInhibitorCount { count, .. } => {
+                state.set_media_inhibitor_count(count);
+                self.refresh_paused(state);
+            }
+
+            Event::MediaStateChanged { state: m, .. } => {
+                let old = self.last_media;
+                self.last_media = m;
+
+                self.refresh_paused(state);
+
+                if cfg.notify_on_unpause
+                    && matches!(old, MediaState::PlayingLocal | MediaState::PlayingRemote)
+                    && matches!(m, MediaState::Idle)
+                    && !state.paused()
+                {
+                    eventline::info!("media ended");
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
+    fn effective_cfg(&self, state: &State) -> Result<Config, Error> {
+        self.cfg_file
+            .effective_for(state.active_profile(), state.plan_source())
+            .ok_or(Error::InvalidConfig(ConfigError::ProfileNotFound))
+    }
+
+    fn refresh_paused(&self, state: &mut State) {
+        let paused = state.manually_paused() || state.inhibitors_active() || state.system_paused();
+        state.set_paused(paused);
+    }
+
+    pub(super) fn normalize_trigger_name(s: &str) -> String {
+        let mut t = s.trim().to_ascii_lowercase();
+        t = t.replace([' ', '\t'], "");
+        t = t.replace('_', "-");
+        t
+    }
+
+    fn trigger_matches_step(name: &str, step: &PlanStep) -> bool {
+        let n = Self::normalize_trigger_name(name);
+
+        let n = match n.as_str() {
+            "lockscreen" => "lock-screen".to_string(),
+            "lock" => "lock-screen".to_string(),
+            _ => n,
+        };
+
+        match &step.kind {
+            PlanStepKind::Startup => n == "startup",
+            PlanStepKind::Dpms => n == "dpms",
+            PlanStepKind::Brightness => n == "brightness",
+            PlanStepKind::LockScreen => n == "lock-screen",
+            PlanStepKind::Suspend => n == "suspend",
+            PlanStepKind::Custom(k) => {
+                let k_norm = Self::normalize_trigger_name(k);
+                n == k_norm || n == format!("custom:{k_norm}") || n == format!("custom-{k_norm}")
+            }
+        }
+    }
+
+    fn find_trigger_step<'a>(&self, cfg: &'a Config, name: &str) -> Option<(usize, &'a PlanStep)> {
+        for (idx, step) in cfg.plan.iter().enumerate() {
+            if !step.enabled() {
+                continue;
+            }
+            if Self::trigger_matches_step(name, step) {
+                return Some((idx, step));
+            }
+        }
+        None
+    }
+
+    fn is_lock_step(step: &PlanStep) -> bool {
+        matches!(step.kind, PlanStepKind::LockScreen)
+    }
+
+    fn is_dpms_group(step: &PlanStep) -> bool {
+        match &step.kind {
+            PlanStepKind::Dpms => true,
+            PlanStepKind::Custom(name) => Self::normalize_trigger_name(name) == "early-dpms",
+            _ => false,
+        }
+    }
+
+    fn is_brightness_group(step: &PlanStep) -> bool {
+        matches!(step.kind, PlanStepKind::Brightness)
+    }
+
+    fn first_enabled_step_after_lock(&self, cfg: &Config) -> usize {
+        let mut seen_lock = false;
+        for (i, s) in cfg.plan.iter().enumerate() {
+            if !s.enabled() {
+                continue;
+            }
+            if !seen_lock && Self::is_lock_step(s) {
+                seen_lock = true;
+                continue;
+            }
+            if seen_lock {
+                return i;
+            }
+        }
+        cfg.plan.len()
+    }
+
+    fn maybe_fire_startup_instants(
+        &self,
+        state: &mut State,
+        cfg: &Config,
+        now_ms: u64,
+    ) -> Vec<Action> {
+        let mut idx = 0usize;
+        let mut out = Vec::new();
+
+        loop {
+            while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+                idx += 1;
+            }
+            if idx >= cfg.plan.len() {
+                break;
+            }
+
+            let step = &cfg.plan[idx];
+            let is_startup = matches!(step.kind, PlanStepKind::Startup);
+            if !(is_startup && step.is_instant()) {
+                break;
+            }
+
+            if state.one_shot_has_fired_step(step) {
+                idx += 1;
+                continue;
+            }
+
+            let emitted = self.actions_for_plan_step(state, step, cfg);
+            if !emitted.is_empty() {
+                let arms_resume = step.resume_command.is_some();
+                let is_dpms = Self::is_dpms_group(step);
+                let is_brightness = Self::is_brightness_group(step);
+                let is_lock = Self::is_lock_step(step);
+
+                state.mark_step_fired(idx, is_dpms, is_brightness, is_lock, arms_resume);
+
+                state.mark_action_fired(now_ms);
+                state.set_pre_action_notify_sent(false);
+            }
+
+            out.extend(emitted);
+            state.mark_one_shot_fired_step(step);
+
+            idx += 1;
+        }
+
+        out
+    }
+
+    fn sync_step_index_after_startup_instants(&self, state: &mut State, cfg: &Config) {
+        if state.step_index() != 0 {
+            return;
+        }
+
+        let mut idx = 0usize;
+
+        loop {
+            while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+                idx += 1;
+            }
+            if idx >= cfg.plan.len() {
+                state.set_step_index(cfg.plan.len());
+                return;
+            }
+
+            let step = &cfg.plan[idx];
+            let is_startup_instant =
+                matches!(step.kind, PlanStepKind::Startup) && step.is_instant();
+
+            if is_startup_instant {
+                idx += 1;
+                continue;
+            }
+
+            state.set_step_index(idx);
+            return;
+        }
+    }
+
+    fn advance_past_lock_if_needed(&self, state: &mut State, cfg: &Config) {
+        if !state.is_locked() {
+            return;
+        }
+
+        let mut idx = state.step_index();
+        while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+            idx += 1;
+        }
+
+        if idx < cfg.plan.len() && Self::is_lock_step(&cfg.plan[idx]) {
+            idx += 1;
+            while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+                idx += 1;
+            }
+            state.set_step_index(idx);
+            state.set_pre_action_notify_sent(false);
+        }
+    }
+
+    fn maybe_fire_next_step(&self, state: &mut State, cfg: &Config, now_ms: u64) -> Vec<Action> {
+        let mut out = Vec::new();
+        let mut idx = state.step_index();
+
+        loop {
+            while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+                idx += 1;
+            }
+            if idx >= cfg.plan.len() {
+                state.set_step_index(cfg.plan.len());
+                return out;
+            }
+
+            if Self::is_lock_step(&cfg.plan[idx]) && state.is_locked() {
+                idx += 1;
+                state.set_step_index(idx);
+                state.set_pre_action_notify_sent(false);
+                continue;
+            }
+
+            let step = &cfg.plan[idx];
+            if step.is_instant() {
+                if state.one_shot_has_fired_step(step) {
+                    idx += 1;
+                    state.set_step_index(idx);
+                    continue;
+                }
+
+                let emitted = self.actions_for_plan_step(state, step, cfg);
+                if !emitted.is_empty() {
+                    let arms_resume = step.resume_command.is_some();
+                    let is_dpms = Self::is_dpms_group(step);
+                    let is_brightness = Self::is_brightness_group(step);
+                    let is_lock = Self::is_lock_step(step);
+
+                    state.mark_step_fired(idx, is_dpms, is_brightness, is_lock, arms_resume);
+                }
+                out.extend(emitted);
+                state.mark_one_shot_fired_step(step);
+
+                idx += 1;
+                state.set_step_index(idx);
+
+                state.set_step_base_ms(now_ms);
+                state.mark_action_fired(now_ms);
+                state.set_pre_action_notify_sent(false);
+                continue;
+            }
+
+            break;
+        }
+
+        while idx < cfg.plan.len() && !cfg.plan[idx].enabled() {
+            idx += 1;
+        }
+        if idx >= cfg.plan.len() {
+            state.set_step_index(cfg.plan.len());
+            return out;
+        }
+
+        let step = &cfg.plan[idx];
+
+        let debounce_ms = if state.debounce_pending() {
+            cfg.debounce_seconds.saturating_mul(1000)
+        } else {
+            0
+        };
+        let timeout_ms = step.timeout_seconds.saturating_mul(1000);
+
+        let base_due_ms = state
+            .step_base_ms()
+            .saturating_add(debounce_ms)
+            .saturating_add(timeout_ms);
+
+        let has_notification = cfg.notify_before_action && step.notification.is_some();
+        let notify_wait_ms = step
+            .notify_seconds_before
+            .unwrap_or(0)
+            .saturating_mul(1000);
+
+        if has_notification {
+            if now_ms < base_due_ms && !state.pre_action_notify_sent() {
+                return out;
+            }
+
+            if !state.pre_action_notify_sent() {
+                let msg = step.notification.clone().unwrap();
+                out.push(Action::Notify { message: msg });
+
+                state.set_pre_action_notify_sent(true);
+                state.set_pre_action_notify_ms(now_ms);
+                return out;
+            }
+
+            let due_after_notify_ms = state.pre_action_notify_ms().saturating_add(notify_wait_ms);
+            if now_ms < due_after_notify_ms {
+                return out;
+            }
+        } else if now_ms < base_due_ms {
+            return out;
+        }
+
+        let emitted = self.actions_for_plan_step(state, step, cfg);
+        if !emitted.is_empty() {
+            let arms_resume = step.resume_command.is_some();
+            let is_dpms = Self::is_dpms_group(step);
+            let is_brightness = Self::is_brightness_group(step);
+            let is_lock = Self::is_lock_step(step);
+
+            state.mark_step_fired(idx, is_dpms, is_brightness, is_lock, arms_resume);
+        }
+        out.extend(emitted);
+
+        state.set_step_index(idx + 1);
+        state.set_step_base_ms(now_ms);
+        state.mark_action_fired(now_ms);
+
+        state.set_pre_action_notify_sent(false);
+        state.set_debounce_pending(false);
+
+        out
+    }
+
+    fn actions_for_plan_step(&self, state: &State, step: &PlanStep, cfg: &Config) -> Vec<Action> {
+        match &step.kind {
+            PlanStepKind::LockScreen => {
+                if state.is_locked() {
+                    return Vec::new();
+                }
+
+                if let Some(cmd) = step.command.clone() {
+                    return vec![Action::RunLockScreen {
+                        command: cmd,
+                        use_loginctl: step.use_loginctl,
+                    }];
+                }
+
+                if step.use_loginctl {
+                    return vec![Action::LockSession];
+                }
+
+                Vec::new()
+            }
+
+            PlanStepKind::Suspend => {
+                let mut out = Vec::new();
+
+                if let Some(cmd) = cfg.pre_suspend_command.clone() {
+                    out.push(Action::RunCommand { command: cmd });
+                }
+
+                if let Some(cmd) = step.command.clone() {
+                    out.push(Action::RunCommand { command: cmd });
+                } else {
+                    out.push(Action::Suspend);
+                }
+
+                out
+            }
+
+            _ => step
+                .command
+                .clone()
+                .map(|c| vec![Action::RunCommand { command: c }])
+                .unwrap_or_default(),
+        }
+    }
+
+    fn resume_commands_for_activity(&self, state: &mut State, cfg: &Config) -> Vec<Action> {
+        if !state.resume_due() {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+
+        if let Some(idx) = state.last_dpms_fired_idx() {
+            if idx < cfg.plan.len() {
+                if let Some(cmd) = cfg.plan[idx].resume_command.clone() {
+                    out.push(Action::RunResumeCommand { command: cmd });
+                }
+            }
+        }
+
+        if let Some(idx) = state.last_brightness_fired_idx() {
+            if idx < cfg.plan.len() {
+                if let Some(cmd) = cfg.plan[idx].resume_command.clone() {
+                    out.push(Action::RunResumeCommand { command: cmd });
+                }
+            }
+        }
+
+        let mut needs_defer_until_unlock = false;
+
+        if state.is_locked() {
+            if let Some(idx) = state.last_lock_fired_idx() {
+                if idx < cfg.plan.len() && cfg.plan[idx].resume_command.is_some() {
+                    needs_defer_until_unlock = true;
+                }
+            }
+
+            if let Some(last) = state.last_fired_idx() {
+                let skip = state.last_dpms_fired_idx() == Some(last)
+                    || state.last_brightness_fired_idx() == Some(last)
+                    || state.last_lock_fired_idx() == Some(last);
+
+                if !skip && last < cfg.plan.len() && cfg.plan[last].resume_command.is_some() {
+                    needs_defer_until_unlock = true;
+                }
+            }
+
+            if needs_defer_until_unlock {
+                state.set_resume_deferred_until_unlock(true);
+            }
+
+            if !out.is_empty() || needs_defer_until_unlock {
+                state.mark_resumed();
+            }
+
+            return out;
+        }
+
+        if let Some(idx) = state.last_lock_fired_idx() {
+            if idx < cfg.plan.len() {
+                if let Some(cmd) = cfg.plan[idx].resume_command.clone() {
+                    out.push(Action::RunResumeCommand { command: cmd });
+                }
+            }
+        }
+
+        if let Some(last) = state.last_fired_idx() {
+            let skip = state.last_dpms_fired_idx() == Some(last)
+                || state.last_brightness_fired_idx() == Some(last)
+                || state.last_lock_fired_idx() == Some(last);
+
+            if !skip && last < cfg.plan.len() {
+                if let Some(cmd) = cfg.plan[last].resume_command.clone() {
+                    out.push(Action::RunResumeCommand { command: cmd });
+                }
+            }
+        }
+
+        state.mark_resumed();
+        out
+    }
+}

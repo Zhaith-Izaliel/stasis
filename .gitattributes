@@ -1,9 +1,0 @@
-# Ignore build artifacts
-website/.svelte-kit/* linguist-generated
-website/build/* linguist-generated
-
-# Ignore node modules
-website/node_modules/* linguist-generated
-
-# Mark Rust code explicitly
-src/**/*.rs linguist-language=Rust
