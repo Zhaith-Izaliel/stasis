@@ -5,7 +5,7 @@
 Description=Stasis Wayland Idle Manager
 PartOf=graphical-session.target
 After=graphical-session.target
-ConditionEnvironment=WAYLAND_DISPLAY
+ConditionPathExists=%t
 
 [Service]
 Type=simple
