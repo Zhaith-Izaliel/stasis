@@ -951,9 +951,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rune-cfg"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3203f444ad735e64a88442bd22003db419e160aa5ea86e397ecd025fe23fd80"
+checksum = "1a821329ca6c00c665b62b9746f1fc6ef942fffb6465cee4405ec4aeffbc41d4"
 dependencies = [
  "dirs",
  "indexmap",
